@@ -1,0 +1,28 @@
+{
+  "name": "fiap-to-notion",
+  "version": "1.0.0",
+  "description": "A web scraper that authenticates, extracts PDFs and videos from FIAP courses, and organizes them in my personal Notion for structured studying.",
+  "author": "Kauan Schaeffer",
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "build:start": "npm run build && npm run start",
+    "start": "node dist/index.js",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "puppeteer": "^24.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/puppeteer": "^7.0.4",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
