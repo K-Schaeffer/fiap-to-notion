@@ -1,6 +1,6 @@
 # FIAP to Notion Web Scraper
 
-A web scraper that authenticates, extracts PDFs and videos from my FIAP course, and organizes the content in my personal Notion for structured studying.
+A work in progress... :hourglass_flowing_sand:
 
 ## Description
 
