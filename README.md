@@ -32,6 +32,7 @@ git clone git@github.com:K-Schaeffer/fiap-to-notion.git
 cd fiap-to-notion
 nvm use # If you have nvm it will set the projects node version for you
 npm install
+cd .env.example .env
 ```
 
 ## Scripts
