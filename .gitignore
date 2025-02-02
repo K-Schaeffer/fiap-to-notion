@@ -22,3 +22,6 @@ jspm_packages/
 
 # bundle
 dist
+
+# downloaded files
+downloads
