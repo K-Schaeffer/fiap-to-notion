@@ -4,7 +4,7 @@ A work in progress... :hourglass_flowing_sand:
 
 ## Description
 
-This project is designed to automate the process of downloading study materials (PDFs and videos) from FIAP courses and uploading them into my personal Notion. The main goal is to streamline the workflow of storing course content for later reference and organization.
+This project is designed to automate the process of downloading study materials (PDFs and videos) from my FIAP course subjects and uploading them into my personal Notion. The main goal is to streamline the workflow of storing course content for later reference and organization.
 
 The scraper will:
 
