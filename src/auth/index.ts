@@ -32,5 +32,5 @@ export async function ensureAccessToCoursePage(page: Page) {
     throw new Error('Failed to access course page');
   }
 
-  console.log('Successfully accessing the subjects page');
+  console.log('Successfully accessing the course page');
 }
