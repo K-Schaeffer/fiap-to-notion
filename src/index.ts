@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { loginToFIAP, ensureAccessToCoursePage } from './auth';
-import { getPhaseList } from './phases';
+import { getPhaseList, getActivePhase } from './phases';
+import { getSubjectList } from './subjects';
 
 async function main() {
   const browser = await puppeteer.launch({ headless: false }); // Change to true to run in headless mode
@@ -22,8 +23,13 @@ async function main() {
   await ensureAccessToCoursePage(page);
 
   const phases = await getPhaseList(page);
+  console.log('Phases:', phases);
 
-  console.log(phases);
+  const activePhase = getActivePhase(phases);
+  console.log('Active phase:', activePhase);
+
+  const subjects = await getSubjectList(page, activePhase);
+  console.log('Subjects in active phase:', subjects);
 
   await browser.close();
 }
