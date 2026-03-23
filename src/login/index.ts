@@ -9,13 +9,13 @@ interface LoginCredentials {
 export async function loginToFIAP(page: Page, { username, password }: LoginCredentials) {
   await page.goto(FIAP_URLS.LOGIN);
 
-  await page.waitForSelector('#login');
+  await page.waitForSelector('#loginbtn-plataforma');
 
-  await page.type('#username', username);
-  await page.type('#password', password);
+  await page.type('#username-plataforma', username);
+  await page.type('#password-plataforma', password);
 
   await Promise.all([
-    page.click('#loginbtn'),
+    page.click('#loginbtn-plataforma'),
     page.waitForNavigation({ waitUntil: 'networkidle0' }),
   ])
     .then(() => {

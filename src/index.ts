@@ -6,6 +6,7 @@ dotenv.config();
 import { loginToFIAP } from './login';
 import { ensureAccessToCoursePage } from './courses';
 import path from 'path';
+import fs from 'fs';
 
 async function main() {
   const browser = await puppeteer.launch({ headless: false }); // Change to true to run in headless mode
@@ -22,8 +23,10 @@ async function main() {
 
   await ensureAccessToCoursePage(page);
 
+  const downloadsDir = path.join(process.cwd(), 'downloads');
+  fs.mkdirSync(downloadsDir, { recursive: true });
   await page.screenshot({
-    path: path.join(process.cwd(), 'downloads/coursesPage.png'),
+    path: path.join(downloadsDir, 'coursesPage.png'),
   });
 
   await browser.close();
