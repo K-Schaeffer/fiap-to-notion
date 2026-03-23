@@ -18,8 +18,8 @@ The scraper will:
 
 Make sure you have the following installed:
 
-- **Node.js** (>= 20.x)
-- **npm** (>= 10.x)
+- **Node.js** (>= 24.x)
+- **npm** (>= 11.x)
 
 **Tip**: It is highly recommended to use **[nvm](https://github.com/nvm-sh/nvm)** (Node Version Manager) to manage and switch between different versions of Node.js easily.
 
