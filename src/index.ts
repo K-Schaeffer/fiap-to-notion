@@ -29,7 +29,7 @@ async function main() {
   console.log('Active phase:', activePhase);
 
   const subjects = await getSubjectList(page, activePhase);
-  console.log('Subjects in active phase:', subjects);
+  console.log('Subjects in active phase:', JSON.stringify(subjects, null, 2));
 
   await browser.close();
 }

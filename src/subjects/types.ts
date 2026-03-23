@@ -1,9 +1,11 @@
-export interface Subject {
+export interface ClassItem {
   title: string;
   contentUrl: string | null;
   pdfUrl: string | null;
-  activityUrl: string | null;
   progress: number | null;
-  tag: string | null;
-  isClosed: boolean;
+}
+
+export interface Subject {
+  title: string;
+  classes: ClassItem[];
 }
