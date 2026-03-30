@@ -13,6 +13,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@notionhq/client": "^5.15.0",
     "dotenv": "^17.3.1",
     "puppeteer": "^24.40.0"
   },
