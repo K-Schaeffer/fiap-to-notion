@@ -12,7 +12,7 @@ export async function getPhaseList(page: Page): Promise<Phase[]> {
     return elements
       .map((element: Element, index: number) => {
         const titleElement = element.querySelector('.conteudo-digital-disciplina-fase');
-        const title = titleElement?.textContent?.trim().replace(/\s+/g, ' ');
+        const title = (titleElement?.textContent ?? '').trim().replace(/\s+/g, ' ');
         const courseId = titleElement?.getAttribute('data-fase');
 
         if (!title?.includes('Fase') || !courseId) {
