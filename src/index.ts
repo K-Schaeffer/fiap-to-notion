@@ -1,8 +1,5 @@
+import 'dotenv/config';
 import puppeteer from 'puppeteer';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
 import { loginToFIAP, ensureAccessToCoursePage } from './auth';
 import { getPhaseList, getActivePhase } from './phases';
 import { getSubjectList } from './subjects';
