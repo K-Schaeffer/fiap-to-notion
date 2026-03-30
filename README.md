@@ -4,15 +4,15 @@ A work in progress... :hourglass_flowing_sand:
 
 ## Description
 
-This project is designed to automate the process of downloading study materials (PDFs and videos) from my FIAP course subjects and uploading them into my personal Notion. The main goal is to streamline the workflow of storing course content for later reference and organization.
+This project automates syncing study materials from my FIAP course into my personal Notion workspace. It scrapes the course platform and uploads video content to the corresponding Notion pages, keeping course content organized without manual effort.
 
 The scraper will:
 
 1. Authenticate on the FIAP course page.
-2. Extract PDFs and video links for each class.
-3. Download the PDFs.
-4. Download and convert the video files.
-5. Upload the PDFs and videos to Notion.
+2. Detect the active phase and extract its subjects and classes.
+3. Match each class to its corresponding page in the Notion Conteúdo database.
+4. Extract HLS video URLs for each class.
+5. Upload the videos to Notion.
 
 ## Prerequisites
 
