@@ -1,16 +1,16 @@
 import { Page } from 'puppeteer';
 import { Phase } from '../phases/types';
-import { Subject, ClassItem } from './types';
+import { Subject } from './types';
 
 export async function getSubjectList(page: Page, activePhase: Phase): Promise<Subject[]> {
   const subjects = await page.evaluate((courseId: string) => {
-    type SubjectRaw = { title: string; classes: ClassItem[] };
-    type ClassItem = {
+    type ClassItemRaw = {
       title: string;
       contentUrl: string | null;
       pdfUrl: string | null;
       progress: number | null;
     };
+    type SubjectRaw = { title: string; classes: ClassItemRaw[] };
 
     const phaseH4 = document.querySelector(
       `.conteudo-digital-disciplina-fase[data-fase="${courseId}"]`,

@@ -14,13 +14,19 @@ export async function getPhaseList(page: Page): Promise<Phase[]> {
           return undefined;
         }
 
-        return { title, isActive: false, index, courseId };
+        const isActiveFromClass =
+          element.classList.contains('active') || element.classList.contains('open');
+        const isActiveFromAria =
+          titleElement?.getAttribute('aria-expanded') === 'true' ||
+          element.getAttribute('aria-expanded') === 'true';
+        const isActive = isActiveFromClass || isActiveFromAria;
+
+        return { title, isActive, index, courseId };
       })
       .filter(
         (phase): phase is { title: string; isActive: boolean; index: number; courseId: string } =>
           phase !== undefined,
-      )
-      .map((phase, idx) => ({ ...phase, isActive: idx === 0 }));
+      );
   });
 
   if (!phaseList || !phaseList.length) {
