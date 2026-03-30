@@ -22,37 +22,43 @@ No test runner is configured yet. Node.js >= 24.x and npm >= 11.x required.
 
 ## Architecture
 
-This is a TypeScript + Puppeteer web scraper that authenticates on the FIAP course platform, extracts course structure, and (eventually) downloads/uploads materials to Notion.
+This is a TypeScript + Puppeteer web scraper that authenticates on the FIAP course platform, extracts course structure, matches classes to Notion, and (next) uploads HLS videos.
 
 **Execution flow** (`src/index.ts`):
 1. Launch Puppeteer browser
 2. `auth/` — Log in with credentials from `.env`, navigate to course page
-3. `phases/` — Scrape available phases, identify the active one
-4. `subjects/` — Scrape subjects and their classes within the active phase
-5. (Planned) Download PDFs and videos, upload to Notion
+3. `phases/` — Scrape all available phases
+4. `cli/` — Interactive prompt: user selects a phase; loops until exit
+5. `subjects/` — Scrape subjects and classes for the selected phase
+6. `notion/` — Resolve Conteúdo DB collection ID, match `ClassItem.title` → Notion page ID
+7. (Next) Extract HLS video URLs from each class's `contentUrl`, upload to Notion
 
 **Module layout**:
 - `src/auth/` — Login and course page access verification
-- `src/phases/` — Extract phase list and active phase from DOM
+- `src/phases/` — Scrape phase list; `getPhaseDisplayTitle()` builds the human-readable label from `Phase.topic`
 - `src/subjects/` — Complex DOM evaluation to build `Subject → ClassItem[]` hierarchy
+- `src/notion/` — Resolve Notion collection IDs and match scraped classes to Conteúdo entries
+- `src/cli/` — Interactive phase selector using `@inquirer/prompts`
 - `src/constants/` — FIAP URLs (single source of truth)
 
 **Key types** (in each module's `types.ts`):
-- `Phase`: title, isActive, index, courseId
+- `Phase`: title, topic (from "Welcome to \<topic\>" marker), isActive, index, courseId
 - `Subject`: title, classes (ClassItem[])
 - `ClassItem`: title, contentUrl, pdfUrl, progress
 
-**DOM scraping pattern**: `phases/` uses `page.$$(selector)` + `element.evaluate()` for per-element extraction; `subjects/` uses a single `page.evaluate()` call running client-side JS against the full document.
+**DOM scraping pattern**: `phases/` uses `page.$$eval()` for batch extraction; `subjects/` uses a single `page.evaluate()` call running client-side JS against the full document.
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in FIAP credentials:
+Copy `.env.example` to `.env`:
 ```
 FIAP_USERNAME=...
 FIAP_PASSWORD=...
+NOTION_TOKEN=...           # Notion integration token
+NOTION_PHASES_DB_ID=...    # Page ID of the top-level Fases database (not the collection ID — resolved internally)
 ```
 
-Credentials are validated at runtime — the scraper will fail fast if they are missing.
+All four vars are validated at startup — the scraper will fail fast if any are missing.
 
 ## FIAP Course Page Structure
 
@@ -68,7 +74,11 @@ The course page DOM hierarchy relevant to scraping:
     - `.t-conteudo-atividades` — marks activity items (assignments/quizzes) — **skipped**
     - `.progresso-conteudo[data-porcentagem]` — completion percentage
 
-Phase active detection: completed courses have no reliable CSS/ARIA active marker — fallback to `phases[0]` (FIAP lists phases newest-first). Items starting with `"Welcome"` or `"Atividade:"` are skipped (section headers, not real content).
+Phase active detection: completed courses have no reliable CSS/ARIA active marker — `isActive` is best-effort and only used to pre-select the default in the CLI prompt. Phase selection is always user-driven.
+
+Items skipped during subject scraping (section headers, not real content):
+- `is-marcador` items starting with `"Welcome"` or `"Atividade:"`
+- Regular items titled `"Conteúdos externos"`
 
 ## Notion Workspace Structure
 
@@ -89,3 +99,4 @@ Inline databases (Disciplinas, Conteúdo) have unique IDs per Fase page and are 
 - Strict TypeScript (`tsconfig.json` has `strict: true`)
 - Imports resolve from `src/` as base URL (e.g., `import { FIAP_URLS } from 'constants'`)
 - Prettier enforced: single quotes, semicolons, trailing commas, 100-char print width
+- `ora` is pinned to **v5** — v6+ dropped CommonJS support and will break this project (`"module": "commonjs"` in `tsconfig.json`)
