@@ -1,9 +1,9 @@
 export interface PhaseCollections {
   fasePageId: string;
-  conteudoDbId: string;
+  conteudoDataSourceId: string;
 }
 
-/** Maps a class title (lowercased) to its Notion Conteúdo page ID */
+/** Maps a class title (original casing from the scraper) to its Notion Conteúdo page ID */
 export type ClassNotionMap = Map<string, string>;
 
 export interface NotionMatchResult {

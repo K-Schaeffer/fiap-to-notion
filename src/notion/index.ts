@@ -13,8 +13,10 @@ import { ClassNotionMap, NotionMatchResult, PhaseCollections } from './types';
  * databases.retrieve bridges the two via its data_sources[] field.
  */
 async function resolveDataSourceId(notion: Client, databasePageId: string): Promise<string> {
-  const db = await (notion.databases.retrieve as Function)({ database_id: databasePageId });
-  const dataSource = (db.data_sources as Array<{ id: string }>)?.[0];
+  const db = (await notion.databases.retrieve({
+    database_id: databasePageId,
+  })) as unknown as { data_sources?: Array<{ id: string }> };
+  const dataSource = db.data_sources?.[0];
   if (!dataSource?.id) {
     throw new Error(`Could not resolve data source ID for database page: ${databasePageId}`);
   }
@@ -51,12 +53,23 @@ export async function getPhaseCollections(
 
   const fasePageId = response.results[0].id;
 
-  // Inline databases appear as child_database blocks on the Fase page
-  const blocks = await notion.blocks.children.list({ block_id: fasePageId });
-  const conteudoBlock = (blocks.results as BlockObjectResponse[]).find(
-    (block): block is ChildDatabaseBlockObjectResponse =>
-      block.type === 'child_database' && block.child_database.title === 'Conteúdo',
-  );
+  // Inline databases appear as child_database blocks on the Fase page — paginate to avoid missing them
+  let blockCursor: string | undefined;
+  let conteudoBlock: ChildDatabaseBlockObjectResponse | undefined;
+  do {
+    const blocks = await notion.blocks.children.list({
+      block_id: fasePageId,
+      start_cursor: blockCursor,
+    });
+    conteudoBlock = (blocks.results as BlockObjectResponse[]).find(
+      (block): block is ChildDatabaseBlockObjectResponse =>
+        block.type === 'child_database' && block.child_database.title === 'Conteúdo',
+    );
+    blockCursor =
+      !conteudoBlock && blocks.has_more && blocks.next_cursor
+        ? blocks.next_cursor
+        : undefined;
+  } while (!conteudoBlock && blockCursor);
 
   if (!conteudoBlock) {
     throw new Error(
@@ -67,7 +80,7 @@ export async function getPhaseCollections(
   // Resolve the inline database's block ID to its data source ID
   const conteudoDataSourceId = await resolveDataSourceId(notion, conteudoBlock.id);
 
-  return { fasePageId, conteudoDbId: conteudoDataSourceId };
+  return { fasePageId, conteudoDataSourceId };
 }
 
 /**
@@ -87,7 +100,7 @@ export async function matchClassesToNotion(
   let cursor: string | undefined;
   do {
     const response = await notion.dataSources.query({
-      data_source_id: collections.conteudoDbId,
+      data_source_id: collections.conteudoDataSourceId,
       start_cursor: cursor,
     });
 
@@ -111,7 +124,7 @@ export async function matchClassesToNotion(
 
   for (const subject of subjects) {
     for (const classItem of subject.classes) {
-      const normalizedTitle = classItem.title.replace(/\s+/g, ' ');
+      const normalizedTitle = classItem.title.trim().replace(/\s+/g, ' ');
       const notionPageId = notionTitleMap.get(normalizedTitle.toLowerCase());
       if (notionPageId) {
         classMap.set(classItem.title, notionPageId);
