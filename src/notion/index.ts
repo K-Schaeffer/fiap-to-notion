@@ -81,7 +81,6 @@ export async function matchClassesToNotion(
   notion: Client,
   collections: PhaseCollections,
   subjects: Subject[],
-  phaseTitle: string,
 ): Promise<NotionMatchResult> {
   // Fetch all Conteúdo entries, paginating if needed
   const notionTitleMap: Map<string, string> = new Map();
@@ -117,9 +116,6 @@ export async function matchClassesToNotion(
       if (notionPageId) {
         classMap.set(classItem.title, notionPageId);
       } else {
-        console.warn(
-          `[notion] No match for class: "${classItem.title}" (subject: "${subject.title}", phase: "${phaseTitle}")`,
-        );
         unmatched.push(classItem.title);
       }
     }
