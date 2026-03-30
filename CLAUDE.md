@@ -54,6 +54,36 @@ FIAP_PASSWORD=...
 
 Credentials are validated at runtime — the scraper will fail fast if they are missing.
 
+## FIAP Course Page Structure
+
+The course page DOM hierarchy relevant to scraping:
+- `.conteudo-digital-disciplina-content` — one per phase
+  - `.conteudo-digital-disciplina-fase[data-fase="<courseId>"]` — phase header; holds title and ID
+- `.conteudo-digital-list` — sibling of the above; contains all subjects and classes for that phase
+  - `.conteudo-digital-item.is-marcador` — subject header row
+  - `.conteudo-digital-item` (without `is-marcador`) — class row under the preceding subject
+    - `.conteudo-digital-txt-name` — title
+    - `.t-conteudo-digital` — link to the video/content page (`contentUrl`)
+    - `.t-conteudo-pdf` — link to the PDF (`pdfUrl`)
+    - `.t-conteudo-atividades` — marks activity items (assignments/quizzes) — **skipped**
+    - `.progresso-conteudo[data-porcentagem]` — completion percentage
+
+Phase active detection: completed courses have no reliable CSS/ARIA active marker — fallback to `phases[0]` (FIAP lists phases newest-first). Items starting with `"Welcome"` or `"Atividade:"` are skipped (section headers, not real content).
+
+## Notion Workspace Structure
+
+```
+Fases DB (NOTION_PHASES_DB_ID)          ← top-level, one row per phase
+  └── Fase N                            ← matched by "Fase N" prefix (FIAP full titles include a subtitle after " - ")
+        ├── Disciplinas DB (inline)     ← not used yet
+        └── Conteúdo DB (inline)        ← one row per class, matched by ClassItem.title
+              schema: Name (title), Disciplina (relation), Status, Docs (file), Período (date)
+```
+
+**Notion SDK v5.15.0 quirk**: `databases.query` was removed. Use `dataSources.query({ data_source_id })` where `data_source_id` is the **collection ID**, not the database page ID. Bridge via `databases.retrieve(pageId).data_sources[0].id` — see `resolveDataSourceId()` in `src/notion/index.ts`.
+
+Inline databases (Disciplinas, Conteúdo) have unique IDs per Fase page and are discovered at runtime by listing child blocks (`blocks.children.list`) and filtering for `child_database` blocks by title.
+
 ## Code Conventions
 
 - Strict TypeScript (`tsconfig.json` has `strict: true`)
