@@ -16,48 +16,51 @@ async function main() {
     throw new Error('Please provide NOTION_TOKEN and NOTION_PHASES_DB_ID in .env file');
   }
 
-  let spinner = ora('[scraper] Logging in to FIAP...').start();
   const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-  await loginToFIAP(page, {
-    username: process.env.FIAP_USERNAME,
-    password: process.env.FIAP_PASSWORD,
-  });
-  spinner.succeed('[scraper] Logged in');
 
-  spinner = ora('[scraper] Loading course page...').start();
-  await ensureAccessToCoursePage(page);
-  spinner.succeed('[scraper] Course page ready');
+  try {
+    let spinner = ora('[scraper] Logging in to FIAP...').start();
+    const page = await browser.newPage();
+    await loginToFIAP(page, {
+      username: process.env.FIAP_USERNAME,
+      password: process.env.FIAP_PASSWORD,
+    });
+    spinner.succeed('[scraper] Logged in');
 
-  spinner = ora('[scraper] Fetching phase list...').start();
-  const phases = await getPhaseList(page);
-  spinner.succeed(`[scraper] Found ${phases.length} phases`);
+    spinner = ora('[scraper] Loading course page...').start();
+    await ensureAccessToCoursePage(page);
+    spinner.succeed('[scraper] Course page ready');
 
-  const notion = new Client({ auth: process.env.NOTION_TOKEN });
+    spinner = ora('[scraper] Fetching phase list...').start();
+    const phases = await getPhaseList(page);
+    spinner.succeed(`[scraper] Found ${phases.length} phases`);
 
-  while (true) {
-    console.log();
-    const selectedPhase = await selectPhase(phases);
-    if (!selectedPhase) break;
+    const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
-    const displayTitle = getPhaseDisplayTitle(selectedPhase);
+    while (true) {
+      console.log();
+      const selectedPhase = await selectPhase(phases);
+      if (!selectedPhase) break;
 
-    spinner = ora(`[scraper] Scraping subjects for ${displayTitle}...`).start();
-    const subjects = await getSubjectList(page, selectedPhase);
-    const classCount = subjects.reduce((sum, s) => sum + s.classes.length, 0);
-    spinner.succeed(`[scraper] Found ${subjects.length} subjects, ${classCount} classes`);
+      const displayTitle = getPhaseDisplayTitle(selectedPhase);
 
-    spinner = ora('[notion] Matching classes...').start();
-    const collections = await getPhaseCollections(notion, selectedPhase);
-    const { classMap, unmatched } = await matchClassesToNotion(notion, collections, subjects);
-    spinner.succeed(`[notion] Matched ${classMap.size}/${classCount} classes`);
+      spinner = ora(`[scraper] Scraping subjects for ${displayTitle}...`).start();
+      const subjects = await getSubjectList(page, selectedPhase);
+      const classCount = subjects.reduce((sum, s) => sum + s.classes.length, 0);
+      spinner.succeed(`[scraper] Found ${subjects.length} subjects, ${classCount} classes`);
 
-    if (unmatched.length) {
-      console.warn(`⚠️  [notion] Unmatched (${unmatched.length}):`, unmatched);
+      spinner = ora('[notion] Matching classes...').start();
+      const collections = await getPhaseCollections(notion, selectedPhase);
+      const { classMap, unmatched } = await matchClassesToNotion(notion, collections, subjects);
+      spinner.succeed(`[notion] Matched ${classMap.size}/${classCount} classes`);
+
+      if (unmatched.length) {
+        console.warn(`⚠️  [notion] Unmatched (${unmatched.length}):`, unmatched);
+      }
     }
+  } finally {
+    await browser.close();
   }
-
-  await browser.close();
 }
 
 main().catch((error) => {
