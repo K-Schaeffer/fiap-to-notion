@@ -14,6 +14,59 @@ The scraper will:
 4. Extract HLS video URLs for each class.
 5. Upload the videos to Notion.
 
+## How It Works
+
+```mermaid
+sequenceDiagram
+    actor user as User
+    participant scraper as Scraper
+    participant fiap as FIAP Platform
+    participant notion as Notion
+
+    user->>scraper: npm run dev
+    scraper->>fiap: Login + fetch phases
+    fiap-->>scraper: Phase list
+    scraper->>user: Select a phase
+    user-->>scraper: Fase N
+
+    scraper->>fiap: Scrape subjects + classes
+    fiap-->>scraper: ClassItem[]
+
+    scraper->>notion: Query Conteúdo DB
+    notion-->>scraper: Existing entries
+    scraper->>scraper: Match titles → page IDs
+
+    scraper->>fiap: Extract HLS video URLs
+    fiap-->>scraper: Video URLs
+    scraper->>notion: Upload videos
+```
+
+## Notion Workspace Structure
+
+> **Note:** This project is tailored to a specific Notion workspace structure. The scraper expects the following hierarchy to exist before running — pages and databases are not created automatically.
+
+```mermaid
+graph TD
+    fases_db[(Fases DB)] --> fase_n[Fase N]
+    fase_n --> disciplinas_db[(Disciplinas DB)]
+    fase_n --> conteudo_db[(Conteúdo DB)]
+    disciplinas_db --> subject[Subject]
+    conteudo_db --> aula[Class]
+    subject -. relation .-> aula
+```
+
+Each **Fase** page contains two inline databases:
+- **Disciplinas** — one row per subject, with a relation to Conteúdo
+- **Conteúdo** — one row per class; this is what the scraper matches against and uploads to
+
+## Technologies
+
+- **[TypeScript](https://www.typescriptlang.org/)** — type-safe JavaScript
+- **[Puppeteer](https://pptr.dev/)** — headless browser for scraping the FIAP course platform
+- **[Notion SDK](https://github.com/makenotion/notion-sdk-js)** — querying and updating the Notion workspace
+- **[@inquirer/prompts](https://github.com/SBoudrias/Inquirer.js)** — interactive CLI prompts
+- **[ora](https://github.com/sindresorhus/ora)** — terminal spinners for async feedback
+
 ## Prerequisites
 
 Make sure you have the following installed:
