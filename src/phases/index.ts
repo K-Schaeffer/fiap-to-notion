@@ -38,8 +38,11 @@ export async function getPhaseList(page: Page): Promise<Phase[]> {
 
 export function getActivePhase(phases: Phase[]): Phase {
   const activePhase = phases.find((phase) => phase.isActive);
-  if (!activePhase) {
-    throw new Error('No active phase found!');
-  }
-  return activePhase;
+  if (activePhase) return activePhase;
+
+  // When no phase has an active CSS/ARIA indicator (e.g. a completed course where
+  // all phases are expanded), fall back to the first phase in the list.
+  // FIAP lists phases newest-first, so index 0 is the most recently active one.
+  console.warn('No CSS-active phase found — defaulting to first phase:', phases[0].title);
+  return phases[0];
 }
