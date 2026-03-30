@@ -13,13 +13,7 @@ export async function loginToFIAP(page: Page, { username, password }: LoginCrede
   await Promise.all([
     page.click('#loginbtn-plataforma'),
     page.waitForNavigation({ waitUntil: 'networkidle0' }),
-  ])
-    .then(() => {
-      console.log('Successfully logged in');
-    })
-    .catch((e) => {
-      console.error('Failed to login:', e);
-    });
+  ]);
 }
 
 export async function ensureAccessToCoursePage(page: Page) {
@@ -32,5 +26,4 @@ export async function ensureAccessToCoursePage(page: Page) {
     throw new Error('Failed to access course page');
   }
 
-  console.log('Successfully accessing the course page');
 }

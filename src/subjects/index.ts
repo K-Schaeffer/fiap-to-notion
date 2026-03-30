@@ -45,9 +45,9 @@ export async function getSubjectList(page: Page, activePhase: Phase): Promise<Su
         current = { title, classes: [] };
         result.push(current);
       } else if (current) {
-        // Skip activity items (assignments, quizzes)
+        // Skip activity items (assignments, quizzes) and external content placeholders
         if (item.querySelector('.t-conteudo-atividades')) continue;
-        if (!title) continue;
+        if (!title || title === 'Conteúdos externos') continue;
 
         const digitalLink = item.querySelector('.t-conteudo-digital') as HTMLAnchorElement | null;
         const pdfLink = item.querySelector('.t-conteudo-pdf') as HTMLAnchorElement | null;
