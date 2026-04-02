@@ -29,3 +29,6 @@ downloads
 #ai
 .claude
 .playwright-mcp
+
+# scraping output (local only, not committed)
+data
