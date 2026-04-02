@@ -4,15 +4,15 @@ A work in progress... :hourglass_flowing_sand:
 
 ## Description
 
-This project automates syncing study materials from my FIAP course into my personal Notion workspace. It scrapes the course platform and uploads video content to the corresponding Notion pages, keeping course content organized without manual effort.
+This project automates syncing study materials from my FIAP course into my personal Notion workspace. It scrapes the course platform, extracts course structure and HLS video URLs, and persists everything locally — ready for upload to Notion.
 
 The scraper will:
 
 1. Authenticate on the FIAP course page.
-2. Detect the active phase and extract its subjects and classes.
-3. Match each class to its corresponding page in the Notion Conteúdo database.
-4. Extract HLS video URLs for each class.
-5. Upload the videos to Notion.
+2. Present an interactive phase selector with sync and video status indicators.
+3. Scrape subjects and classes for the selected phase, matching each to its Notion page.
+4. Extract HLS video URLs for each class, persisting progress to `output/output.json` after every class so runs are resumable on crash or CloudFront block.
+5. _(Upcoming)_ Upload videos to Notion.
 
 ## How It Works
 
@@ -20,25 +20,38 @@ The scraper will:
 sequenceDiagram
     actor user as User
     participant scraper as Scraper
+    participant state as output.json
     participant fiap as FIAP Platform
     participant notion as Notion
 
     user->>scraper: npm run dev
     scraper->>fiap: Login + fetch phases
     fiap-->>scraper: Phase list
-    scraper->>user: Select a phase
-    user-->>scraper: Fase N
+    scraper->>state: Load local data (last sync timestamp)
+    state-->>scraper: Synced phases + video status
 
-    scraper->>fiap: Scrape subjects + classes
-    fiap-->>scraper: ClassItem[]
+    loop Until exit
+        scraper->>user: Select phase [S][V] status indicators
+        user-->>scraper: Fase N + action
 
-    scraper->>notion: Query Conteúdo DB
-    notion-->>scraper: Existing entries
-    scraper->>scraper: Match titles → page IDs
+        opt Sync (first run only)
+            scraper->>fiap: Scrape subjects + classes
+            fiap-->>scraper: ClassItem[]
+            scraper->>notion: Query Conteúdo DB
+            notion-->>scraper: Existing entries
+            scraper->>scraper: Match titles → page IDs
+            scraper->>state: Upsert phase (preserve existing videos)
+        end
 
-    scraper->>fiap: Extract HLS video URLs
-    fiap-->>scraper: Video URLs
-    scraper->>notion: Upload videos
+        opt Get Videos
+            loop Each unfetched class (sequential)
+                scraper->>fiap: Navigate to class content page (new tab)
+                fiap-->>scraper: Playlist items + thumbnail URLs
+                scraper->>scraper: Derive HLS URLs from CDN hash
+                scraper->>state: Write class videos immediately
+            end
+        end
+    end
 ```
 
 ## Notion Workspace Structure
