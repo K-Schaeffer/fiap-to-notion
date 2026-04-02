@@ -6,7 +6,10 @@ import { Page } from 'puppeteer';
  * so we check content rather than HTTP status which may not propagate reliably.
  */
 export async function assertNotBlocked(page: Page): Promise<void> {
-  const isBlocked = await page.evaluate(() => document.title.toLowerCase().includes('error'));
+  // CloudFront WAF block pages always contain this specific string in the body
+  const isBlocked = await page.evaluate(() =>
+    document.body?.textContent?.includes('The request could not be satisfied'),
+  );
   if (isBlocked) {
     throw new Error(
       `CloudFront blocked the request for ${page.url()} — stop and retry later.`,

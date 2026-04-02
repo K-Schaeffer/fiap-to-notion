@@ -110,14 +110,17 @@ async function main() {
           .flatMap((s) => s.classes)
           .filter((c) => c.contentUrl !== null).length;
         let fetchedCount = 0;
+        // Read once upfront; onClassDone updates this local copy and writes it,
+        // avoiding redundant disk reads on every class completion
+        let currentOutput = readOutput();
         spinner = ora(`[scraper] Fetching videos... (0/${classesWithUrlCount} classes)`).start();
         let classVideos;
         try {
           classVideos = await getAllVideos(page, subjects, {
             onClassDone: ({ classTitle, videos }) => {
               spinner.text = `[scraper] Fetching videos... (${++fetchedCount}/${classesWithUrlCount} classes)`;
-              // Write incrementally after each class so progress is never lost
-              writeOutput(setPhaseVideos(readOutput(), selectedPhase.title, [{ classTitle, videos }]));
+              currentOutput = setPhaseVideos(currentOutput, selectedPhase.title, [{ classTitle, videos }]);
+              writeOutput(currentOutput);
             },
           });
         } catch (err) {
