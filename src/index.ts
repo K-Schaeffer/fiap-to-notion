@@ -1,31 +1,49 @@
 import 'dotenv/config';
 import ora from 'ora';
-import puppeteer from 'puppeteer';
+import puppeteer, { Browser } from 'puppeteer';
 import { Client } from '@notionhq/client';
 import { loginToFIAP, ensureAccessToCoursePage } from './auth';
 import { getPhaseList, getPhaseDisplayTitle } from './phases';
 import { getSubjectList } from './subjects';
 import { getPhaseCollections, matchClassesToNotion } from './notion';
-import { selectPhase, selectPhaseAction } from './cli';
+import {
+  selectMode,
+  selectPhase,
+  selectPhaseAction,
+  selectConverterPhase,
+  selectConverterAction,
+} from './cli';
 import { getAllVideos } from './content-video';
-import { hasLocalData, readOutput, writeOutput, upsertPhase, setPhaseVideos } from './state';
+import {
+  hasLocalData,
+  readOutput,
+  writeOutput,
+  upsertPhase,
+  setPhaseVideos,
+  setVideoConverted,
+} from './state';
+import { assertFfmpegAvailable, convertPhaseVideos } from './download';
 
-async function main() {
+function validateScraperEnv(): void {
   if (!process.env.FIAP_USERNAME || !process.env.FIAP_PASSWORD) {
     throw new Error('Please provide FIAP_USERNAME and FIAP_PASSWORD in .env file');
   }
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_PHASES_DB_ID) {
     throw new Error('Please provide NOTION_TOKEN and NOTION_PHASES_DB_ID in .env file');
   }
+}
 
-  const browser = await puppeteer.launch({ headless: false });
+async function runScraper(): Promise<void> {
+  validateScraperEnv();
+
+  const browser: Browser = await puppeteer.launch({ headless: true });
 
   try {
     let spinner = ora('[scraper] Logging in to FIAP...').start();
     const page = await browser.newPage();
     await loginToFIAP(page, {
-      username: process.env.FIAP_USERNAME,
-      password: process.env.FIAP_PASSWORD,
+      username: process.env.FIAP_USERNAME!,
+      password: process.env.FIAP_PASSWORD!,
     });
     spinner.succeed('[scraper] Logged in');
 
@@ -39,7 +57,9 @@ async function main() {
 
     if (hasLocalData()) {
       const { lastUpdated } = readOutput();
-      console.log(`\nℹ️  Local scraping data found (last synced: ${new Date(lastUpdated).toLocaleString()})`);
+      console.log(
+        `\nℹ️  Local scraping data found (last synced: ${new Date(lastUpdated).toLocaleString()})`,
+      );
     }
 
     const notion = new Client({ auth: process.env.NOTION_TOKEN });
@@ -62,11 +82,10 @@ async function main() {
 
       const { phase: selectedPhase } = selection;
       const displayTitle = getPhaseDisplayTitle(selectedPhase);
-      const isSynced = syncedPhaseTitles.has(selectedPhase.title);
-      // '✓' phases are disabled in the selector so only '~' or ' ' reach here
-      const videoStatus = (phaseVideoStatus.get(selectedPhase.title) ?? ' ') as '~' | ' ';
+      const isSynced = syncedPhaseTitles.has(displayTitle);
+      const videoStatus = (phaseVideoStatus.get(displayTitle) ?? ' ') as '~' | ' ';
 
-      let action = await selectPhaseAction(isSynced, videoStatus);
+      const action = await selectPhaseAction(isSynced, videoStatus);
       if (action === 'go-back') continue;
       if (action === 'exit') break;
 
@@ -88,12 +107,11 @@ async function main() {
         }
 
         writeOutput(upsertPhase(readOutput(), selectedPhase, subjects, classMap));
-        spinner.succeed(`[scraper] Saved phase data to output/output.json`);
+        spinner.succeed(`[scraper] Saved phase data to data/output.json`);
       }
 
       if (action === 'get-videos') {
-        // Re-read from output, skipping classes already fully fetched
-        const phaseData = readOutput().phases.find((p) => p.title === selectedPhase.title)!;
+        const phaseData = readOutput().phases.find((p) => p.title === displayTitle)!;
         const subjects = phaseData.subjects.map((s) => ({
           title: s.title,
           classes: s.classes
@@ -110,8 +128,6 @@ async function main() {
           .flatMap((s) => s.classes)
           .filter((c) => c.contentUrl !== null).length;
         let fetchedCount = 0;
-        // Read once upfront; onClassDone updates this local copy and writes it,
-        // avoiding redundant disk reads on every class completion
         let currentOutput = readOutput();
         spinner = ora(`[scraper] Fetching videos... (0/${classesWithUrlCount} classes)`).start();
         let classVideos;
@@ -119,12 +135,14 @@ async function main() {
           classVideos = await getAllVideos(page, subjects, {
             onClassDone: ({ classTitle, videos }) => {
               spinner.text = `[scraper] Fetching videos... (${++fetchedCount}/${classesWithUrlCount} classes)`;
-              currentOutput = setPhaseVideos(currentOutput, selectedPhase.title, [{ classTitle, videos }]);
+              currentOutput = setPhaseVideos(currentOutput, displayTitle, [{ classTitle, videos }]);
               writeOutput(currentOutput);
             },
           });
         } catch (err) {
-          spinner.fail(`[scraper] Fetching videos interrupted (${fetchedCount}/${classesWithUrlCount} classes)`);
+          spinner.fail(
+            `[scraper] Fetching videos interrupted (${fetchedCount}/${classesWithUrlCount} classes)`,
+          );
           throw err;
         }
 
@@ -132,12 +150,108 @@ async function main() {
         if (totalVideos === 0) {
           spinner.warn('\n⚠️  [scraper] No videos found');
         } else {
-          spinner.succeed(`[scraper] Found ${totalVideos} videos across ${classVideos.length} classes, saved to output/output.json`);
+          spinner.succeed(
+            `[scraper] Found ${totalVideos} videos across ${classVideos.length} classes, saved to data/output.json`,
+          );
         }
       }
     }
   } finally {
     await browser.close();
+  }
+}
+
+function getConversionStatus(
+  phases: { title: string; subjects: { classes: { videos: { converted: boolean }[] }[] }[] }[],
+): Map<string, '✓' | '~' | ' '> {
+  return new Map(
+    phases.map((p) => {
+      const allVideos = p.subjects.flatMap((s) => s.classes.flatMap((c) => c.videos));
+      if (allVideos.length === 0) return [p.title, ' ' as const];
+      const convertedCount = allVideos.filter((v) => v.converted).length;
+      const mark = convertedCount === 0 ? ' ' : convertedCount === allVideos.length ? '✓' : '~';
+      return [p.title, mark as '✓' | '~' | ' '];
+    }),
+  );
+}
+
+async function runConverter(): Promise<void> {
+  assertFfmpegAvailable();
+
+  while (true) {
+    console.log();
+    const output = readOutput();
+
+    // Only show phases that have videos fetched
+    const eligiblePhases = output.phases.filter((p) =>
+      p.subjects.some((s) => s.classes.some((c) => c.videosFetched && c.videos.length > 0)),
+    );
+
+    if (eligiblePhases.length === 0) {
+      console.log('⚠️  No phases with fetched videos. Run the Scraper first to fetch video URLs.');
+      return;
+    }
+
+    const conversionStatus = getConversionStatus(eligiblePhases);
+    const selection = await selectConverterPhase(eligiblePhases, conversionStatus);
+
+    if (selection.type === 'exit') break;
+
+    const { phase: selectedPhase } = selection;
+    const status = (conversionStatus.get(selectedPhase.title) ?? ' ') as '~' | ' ';
+
+    const action = await selectConverterAction(status);
+    if (action === 'go-back') continue;
+    if (action === 'exit') break;
+
+    console.log();
+
+    const allVideos = selectedPhase.subjects.flatMap((s) => s.classes.flatMap((c) => c.videos));
+    const totalVideos = allVideos.length;
+    let convertedCount = allVideos.filter((v) => v.converted).length;
+
+    let currentOutput = readOutput();
+    const spinner = ora(`[converter] (${convertedCount}/${totalVideos}) Starting...`).start();
+
+    try {
+      await convertPhaseVideos(selectedPhase.title, selectedPhase.subjects, {
+        onProgress: ({ videoTitle, time }) => {
+          spinner.text = `[converter] (${convertedCount}/${totalVideos}) ${videoTitle} — ${time}`;
+        },
+        onVideoDone: ({ classTitle, videoTitle }) => {
+          convertedCount++;
+          // Log completed video above the spinner
+          spinner.clear();
+          console.log(`  ✓ ${videoTitle}`);
+          spinner.text = `[converter] (${convertedCount}/${totalVideos}) Downloading...`;
+          spinner.render();
+
+          currentOutput = setVideoConverted(
+            currentOutput,
+            selectedPhase.title,
+            classTitle,
+            videoTitle,
+          );
+          writeOutput(currentOutput);
+        },
+      });
+    } catch (err) {
+      spinner.fail(`[converter] Conversion interrupted (${convertedCount}/${totalVideos})`);
+      throw err;
+    }
+
+    spinner.succeed(`[converter] All videos converted (${convertedCount}/${totalVideos})`);
+  }
+}
+
+async function main() {
+  while (true) {
+    console.log();
+    const mode = await selectMode(hasLocalData());
+
+    if (mode === 'exit') break;
+    if (mode === 'scraper') await runScraper();
+    if (mode === 'converter') await runConverter();
   }
 }
 
