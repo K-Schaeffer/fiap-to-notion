@@ -23,10 +23,13 @@ async function scrapeClassVideos(page: Page, contentUrl: string): Promise<Conten
   await assertNotBlocked(page);
 
   // The iframe loads asynchronously — wait until .pos_videos_container is present inside it
-  await page.waitForFunction(() => {
-    const iframe = document.querySelector('#iframecontent') as HTMLIFrameElement | null;
-    return !!iframe?.contentDocument?.querySelector('.pos_videos_container');
-  }, { timeout: TIMEOUT_MS });
+  await page.waitForFunction(
+    () => {
+      const iframe = document.querySelector('#iframecontent') as HTMLIFrameElement | null;
+      return !!iframe?.contentDocument?.querySelector('.pos_videos_container');
+    },
+    { timeout: TIMEOUT_MS },
+  );
 
   const rawVideos = await page.evaluate(() => {
     const iframe = document.querySelector('#iframecontent') as HTMLIFrameElement | null;
@@ -37,7 +40,8 @@ async function scrapeClassVideos(page: Page, contentUrl: string): Promise<Conten
       title: item.querySelector('.pos-playlist-item-title')?.textContent?.trim() ?? '',
       duration: item.querySelector('.pos-playlist-duration')?.textContent?.trim() ?? '',
       // .src gives the absolute URL; used to derive the HLS URL via the shared CDN hash
-      thumbnailUrl: (item.querySelector('.pos-playlist-image-thumbnail') as HTMLImageElement | null)?.src ?? '',
+      thumbnailUrl:
+        (item.querySelector('.pos-playlist-image-thumbnail') as HTMLImageElement | null)?.src ?? '',
     }));
   });
 
@@ -47,6 +51,7 @@ async function scrapeClassVideos(page: Page, contentUrl: string): Promise<Conten
       title: v.title,
       duration: v.duration,
       hlsUrl: hlsUrlFromThumbnail(v.thumbnailUrl),
+      converted: false,
     }));
 }
 

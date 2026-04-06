@@ -1,12 +1,13 @@
 import { select, Separator } from '@inquirer/prompts';
 import { Phase } from '../phases/types';
 import { getPhaseDisplayTitle } from '../phases';
+import { StatePhase } from '../state/types';
+
+export type AppMode = 'scraper' | 'converter' | 'exit';
 
 export type PhaseAction = 'sync' | 'get-videos' | 'go-back' | 'exit';
 
-export type PhaseSelectionResult =
-  | { type: 'phase'; phase: Phase }
-  | { type: 'exit' };
+export type PhaseSelectionResult = { type: 'phase'; phase: Phase } | { type: 'exit' };
 
 /**
  * Prompts the user to choose an action after a phase is selected.
@@ -17,12 +18,17 @@ const VIDEO_ACTION_LABEL: Record<'~' | ' ', string> = {
   ' ': 'Get Videos',
 };
 
-export async function selectPhaseAction(isSynced: boolean, videoStatus: '~' | ' '): Promise<PhaseAction> {
+export async function selectPhaseAction(
+  isSynced: boolean,
+  videoStatus: '~' | ' ',
+): Promise<PhaseAction> {
   return select<PhaseAction>({
     message: 'What would you like to do?',
     choices: [
       ...(!isSynced ? [{ name: 'Sync', value: 'sync' as PhaseAction }] : []),
-      ...(isSynced ? [{ name: VIDEO_ACTION_LABEL[videoStatus], value: 'get-videos' as PhaseAction }] : []),
+      ...(isSynced
+        ? [{ name: VIDEO_ACTION_LABEL[videoStatus], value: 'get-videos' as PhaseAction }]
+        : []),
       { name: 'Go back', value: 'go-back' },
       new Separator(),
       { name: 'Exit', value: 'exit' },
@@ -48,9 +54,9 @@ export async function selectPhase(
     message: 'Select a phase:',
     choices: [
       ...phases.map((phase) => {
-        const synced = syncedPhaseTitles.has(phase.title);
-        const videoMark = phaseVideoStatus.get(phase.title) ?? ' ';
         const label = getPhaseDisplayTitle(phase);
+        const synced = syncedPhaseTitles.has(label);
+        const videoMark = phaseVideoStatus.get(label) ?? ' ';
         const suffix = phase.isActive ? ' (active)' : '';
         const done = synced && videoMark === '✓';
         return {
@@ -67,4 +73,73 @@ export async function selectPhase(
 
   if (result === 'exit') return { type: 'exit' };
   return { type: 'phase', phase: result };
+}
+
+// --- Top-level mode selector ---
+
+export async function selectMode(hasScrapedData: boolean): Promise<AppMode> {
+  return select<AppMode>({
+    message: 'What would you like to do?',
+    choices: [
+      { name: 'Scraper', value: 'scraper' },
+      { name: 'Video Converter', value: 'converter', disabled: !hasScrapedData },
+      new Separator(),
+      { name: 'Exit', value: 'exit' },
+    ],
+  });
+}
+
+// --- Converter CLI ---
+
+export type ConverterPhaseResult = { type: 'phase'; phase: StatePhase } | { type: 'exit' };
+
+export type ConverterAction = 'convert-videos' | 'go-back' | 'exit';
+
+/**
+ * Prompts the user to select a phase for video conversion.
+ * Only phases with fetched videos appear. Fully converted phases are disabled.
+ */
+export async function selectConverterPhase(
+  phases: StatePhase[],
+  conversionStatus: Map<string, '✓' | '~' | ' '>,
+): Promise<ConverterPhaseResult> {
+  type Choice = StatePhase | 'exit';
+
+  console.log('  [C]  C = Converted (✓ all · ~ partial)');
+  const result = await select<Choice>({
+    message: 'Select a phase to convert:',
+    choices: [
+      ...phases.map((phase) => {
+        const mark = conversionStatus.get(phase.title) ?? ' ';
+        const done = mark === '✓';
+        return {
+          name: `[${mark}] ${phase.title}`,
+          value: phase as Choice,
+          disabled: done,
+        };
+      }),
+      new Separator(),
+      { name: 'Exit', value: 'exit' as Choice },
+    ],
+  });
+
+  if (result === 'exit') return { type: 'exit' };
+  return { type: 'phase', phase: result };
+}
+
+const CONVERT_ACTION_LABEL: Record<'~' | ' ', string> = {
+  '~': 'Continue converting videos',
+  ' ': 'Convert Videos',
+};
+
+export async function selectConverterAction(conversionStatus: '~' | ' '): Promise<ConverterAction> {
+  return select<ConverterAction>({
+    message: 'What would you like to do?',
+    choices: [
+      { name: CONVERT_ACTION_LABEL[conversionStatus], value: 'convert-videos' },
+      { name: 'Go back', value: 'go-back' },
+      new Separator(),
+      { name: 'Exit', value: 'exit' },
+    ],
+  });
 }

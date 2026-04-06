@@ -11,8 +11,6 @@ export async function assertNotBlocked(page: Page): Promise<void> {
     document.body?.textContent?.includes('The request could not be satisfied'),
   );
   if (isBlocked) {
-    throw new Error(
-      `CloudFront blocked the request for ${page.url()} — stop and retry later.`,
-    );
+    throw new Error(`CloudFront blocked the request for ${page.url()} — stop and retry later.`);
   }
 }

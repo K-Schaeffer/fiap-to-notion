@@ -66,9 +66,7 @@ export async function getPhaseCollections(
         block.type === 'child_database' && block.child_database.title === 'Conteúdo',
     );
     blockCursor =
-      !conteudoBlock && blocks.has_more && blocks.next_cursor
-        ? blocks.next_cursor
-        : undefined;
+      !conteudoBlock && blocks.has_more && blocks.next_cursor ? blocks.next_cursor : undefined;
   } while (!conteudoBlock && blockCursor);
 
   if (!conteudoBlock) {

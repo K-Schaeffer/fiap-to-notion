@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Phase } from '../phases/types';
+import { getPhaseDisplayTitle } from '../phases';
 import { Subject } from '../subjects/types';
 import { ClassNotionMap } from '../notion/types';
 import { ContentVideo } from '../content-video/types';
@@ -22,7 +23,10 @@ export function readOutput(): ScraperOutput {
 
 export function writeOutput(output: ScraperOutput): void {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify({ ...output, lastUpdated: new Date().toISOString() }, null, 2));
+  fs.writeFileSync(
+    OUTPUT_FILE,
+    JSON.stringify({ ...output, lastUpdated: new Date().toISOString() }, null, 2),
+  );
 }
 
 export function clearOutput(): void {
@@ -39,10 +43,11 @@ export function upsertPhase(
   subjects: Subject[],
   classMap: ClassNotionMap,
 ): ScraperOutput {
-  const existingPhase = output.phases.find((p) => p.title === phase.title);
+  const displayTitle = getPhaseDisplayTitle(phase);
+  const existingPhase = output.phases.find((p) => p.title === displayTitle);
 
   const updatedPhase: StatePhase = {
-    title: phase.title,
+    title: displayTitle,
     subjects: subjects.map((subject) => ({
       title: subject.title,
       classes: subject.classes.map((classItem) => {
@@ -65,10 +70,42 @@ export function upsertPhase(
   };
 
   const phases = existingPhase
-    ? output.phases.map((p) => (p.title === phase.title ? updatedPhase : p))
+    ? output.phases.map((p) => (p.title === displayTitle ? updatedPhase : p))
     : [...output.phases, updatedPhase];
 
   return { ...output, phases };
+}
+
+/**
+ * Marks a specific video as converted within a phase.
+ */
+export function setVideoConverted(
+  output: ScraperOutput,
+  phaseTitle: string,
+  classTitle: string,
+  videoTitle: string,
+): ScraperOutput {
+  return {
+    ...output,
+    phases: output.phases.map((phase) => {
+      if (phase.title !== phaseTitle) return phase;
+      return {
+        ...phase,
+        subjects: phase.subjects.map((subject) => ({
+          ...subject,
+          classes: subject.classes.map((cls) => {
+            if (cls.title !== classTitle) return cls;
+            return {
+              ...cls,
+              videos: cls.videos.map((v) =>
+                v.title === videoTitle ? { ...v, converted: true } : v,
+              ),
+            };
+          }),
+        })),
+      };
+    }),
+  };
 }
 
 /**
@@ -91,9 +128,7 @@ export function setPhaseVideos(
           ...subject,
           classes: subject.classes.map((cls) => {
             const videos = videosByClass.get(cls.title);
-            return videos !== undefined
-              ? { ...cls, videos, videosFetched: true }
-              : cls;
+            return videos !== undefined ? { ...cls, videos, videosFetched: true } : cls;
           }),
         })),
       };
