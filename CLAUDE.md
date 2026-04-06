@@ -76,7 +76,7 @@ Converted videos are stored at `data/videos/<phase>/<subject>/<class>/<video>.mp
 
 **ffmpeg**: requires system ffmpeg on PATH. Static npm binaries (`ffmpeg-static`, `@ffmpeg-installer/ffmpeg`) crash on TLS when fetching HLS from CloudFront — do not use them. Validated at converter startup via `assertFfmpegAvailable()`.
 
-**Download strategy**: all unconverted videos in a phase download in parallel via `Promise.all`, each spawning its own ffmpeg process. Uses `-c copy` (remux, no re-encoding) and `-movflags +faststart`. Parallelism is safe here — ffmpeg fetches `.ts` segments directly from the CDN, not through the WAF-protected course pages.
+**Download strategy**: all unconverted videos in a phase download in parallel via `Promise.all`, each spawning its own ffmpeg process. Uses `-c copy` (remux, no re-encoding) and `-movflags +faststart`. Parallelism is safe here — ffmpeg fetches `.ts` segments directly from the CDN, not through the WAF-protected course pages. Concurrency can be limited via the `FFMPEG_CONCURRENCY` env var (e.g. `FFMPEG_CONCURRENCY=5`); when unset, all videos download at once.
 
 **Progress display**: single ora spinner shows overall count and current video progress (`time=HH:MM:SS`). Completed videos log a `✓` line above the spinner.
 
@@ -114,9 +114,10 @@ FIAP_USERNAME=...
 FIAP_PASSWORD=...
 NOTION_TOKEN=...           # Notion integration token
 NOTION_PHASES_DB_ID=...    # Page ID of the top-level Fases database (not the collection ID — resolved internally)
+FFMPEG_CONCURRENCY=...     # Optional — max parallel ffmpeg processes (default: unlimited)
 ```
 
-Env vars are validated when entering **Scraper mode** only — not at global startup. The Video Converter mode is fully offline and only needs `data/output.json` + system ffmpeg.
+Scraper vars are validated when entering **Scraper mode** only — not at global startup. The Video Converter mode is fully offline and only needs `data/output.json` + system ffmpeg.
 
 ## FIAP Course Page Structure
 

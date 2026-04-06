@@ -136,6 +136,16 @@ npm install
 cp .env.example .env
 ```
 
+### Environment variables
+
+| Variable              | Required | Description                                        |
+| --------------------- | -------- | -------------------------------------------------- |
+| `FIAP_USERNAME`       | Scraper  | FIAP course login                                  |
+| `FIAP_PASSWORD`       | Scraper  | FIAP course password                               |
+| `NOTION_TOKEN`        | Scraper  | Notion integration token                           |
+| `NOTION_PHASES_DB_ID` | Scraper  | Page ID of the top-level Fases database            |
+| `FFMPEG_CONCURRENCY`  | No       | Max parallel ffmpeg processes (default: unlimited) |
+
 ## Output
 
 All output is stored in `data/` (gitignored):

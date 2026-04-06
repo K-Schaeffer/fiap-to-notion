@@ -132,7 +132,17 @@ export async function convertPhaseVideos(
     ),
   );
 
-  await Promise.all(tasks.map((task) => task()));
+  const concurrency = process.env.FFMPEG_CONCURRENCY
+    ? parseInt(process.env.FFMPEG_CONCURRENCY, 10)
+    : 0;
+
+  if (concurrency > 0) {
+    for (let i = 0; i < tasks.length; i += concurrency) {
+      await Promise.all(tasks.slice(i, i + concurrency).map((task) => task()));
+    }
+  } else {
+    await Promise.all(tasks.map((task) => task()));
+  }
 
   return tasks.length;
 }
