@@ -47,38 +47,38 @@ The Notion API does **not** support direct file uploads in block creation. Howev
 - **`video` block with `external` type**: requires a publicly accessible URL.
 - **`file` block with Notion-hosted file**: only for files uploaded through the Notion UI.
 
-### Recommended Strategy: Temporary Public URL via Notion File Upload API
+### Recommended Strategy: External URL via User-Configured Hosting
 
-Check if `@notionhq/client` v5.15.0 supports the newer **File Upload API** (`notion.files.upload()`). If available:
+The Notion Public API does **not** support direct file uploads (binary data) for integrations. There is no `notion.files.upload()` method in the official SDK. Integrations must provide a publicly accessible URL via the `external` type for video blocks.
 
-1. Upload MP4 → get Notion-hosted file URL
-2. Create `video` block referencing the uploaded file
+**Primary approach**: Upload MP4 files to a user-configured storage service and use `external` URL video blocks.
 
-If the File Upload API is **not** available in v5.15.0, the fallback options are:
+Options for hosting (to be decided during implementation):
 
-- **Fallback A**: Upload to a temporary file host (e.g., transfer.sh, or a user-configured S3 bucket) and use `external` URL blocks. Adds env config complexity.
-- **Fallback B**: Skip API upload entirely; instead, output a structured summary so the user can manually drag-drop files in Notion. Minimal value.
-- **Fallback C**: Use the undocumented internal Notion API for file uploads (fragile, not recommended).
+- **Option A (Recommended)**: User-configured S3-compatible bucket. Add `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` env vars. Upload via `@aws-sdk/client-s3`, get public URL, create `video` block with `external.url`. Most reliable for large lecture videos.
+- **Option B**: Use a simpler file hosting service (e.g., Cloudflare R2, Backblaze B2) with S3-compatible API — same implementation as Option A.
+- **Option C**: Serve files locally via a temporary HTTP server during upload, then the videos would only be playable while the server runs. Not practical.
 
-> **Action item (Step 0)**: Before implementation, verify what the Notion SDK v5.15.0 supports for file uploads. Check the SDK source/types for `files.upload()`, `blocks.children.append()` with file-type video blocks, or any `POST /v1/files` endpoint. This determines the entire upload path.
+> **Action item (Step 0)**: Decide on hosting strategy and required env vars. S3-compatible storage (Option A) is the recommended default. The implementation should be modular enough to swap hosting backends later.
 
 ---
 
 ## Implementation Plan
 
-### Step 0: Spike — Verify Notion File Upload Capability
+### Step 0: Spike — Set Up External File Hosting
 
-**Files**: None (research only)
+**Files**: None initially (research + config)
 
-- [ ] Check `@notionhq/client@5.15.0` types for `notion.files` namespace
-- [ ] Test creating a `video` block via `blocks.children.append()` with both `external` and `file` types
-- [ ] If SDK lacks file upload, check the [Notion API changelog](https://developers.notion.com/changelog) for the File Upload API and whether it can be called via raw HTTP
-- [ ] Document findings — this gates the rest of the plan
+The Notion Public API does **not** support direct file uploads for integrations. There is no `notion.files.upload()` in the SDK. Video blocks require a publicly accessible URL via the `external` type.
 
-**Expected outcome**: Confirm one of:
-1. SDK supports `files.upload()` → proceed with direct upload
-2. SDK doesn't, but raw API does → add a helper using `fetch()` to call the endpoint
-3. Neither works → pivot to external URL approach (user provides S3/hosting config)
+**Tasks**:
+- [ ] Decide on hosting backend (S3, Cloudflare R2, Backblaze B2, etc.)
+- [ ] Define required env vars (e.g., `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`)
+- [ ] Add the chosen S3-compatible SDK as a dependency (e.g., `@aws-sdk/client-s3`)
+- [ ] Test creating a `video` block via `blocks.children.append()` with `external` type and a public URL
+- [ ] Verify video playback works inline in Notion with the hosted URL
+
+**Expected outcome**: A working proof-of-concept showing an MP4 uploaded to S3, referenced via an `external` video block in a Notion page, playing inline
 
 ---
 
@@ -147,15 +147,13 @@ This is the most sensitive part. The algorithm:
    - Only append NEW video embeds (compare against existing ones to avoid duplicates)
 4. **If "Playlist" toggle does NOT exist**:
    - Create the toggle H1 + video embeds as a single `blocks.children.append()` call
-   - **Prepend strategy**: The Notion API `blocks.children.append()` only appends (adds to the end). To prepend (insert at the beginning), use the `after` parameter with a careful approach:
-     - The API supports `after: <block_id>` to insert after a specific block
-     - **To insert at the very beginning**, there is no `before` parameter. Workaround:
-       - **Option A**: Append the toggle, then move existing content after it. But Notion API doesn't support reordering blocks.
-       - **Option B (Recommended)**: Use `blocks.children.append()` with `after` parameter — as of API version 2022-06-28+, you can pass `after: ""` or use the page ID itself. **Verify this in testing.**
-       - **Option C (Reliable fallback)**: Accept that the toggle goes at the end. Then, to move it to the top, delete all existing blocks and re-create them in the correct order (toggle first, then originals). **RISKY** — if the process crashes mid-recreation, content is lost.
-       - **Option D (Safest fallback)**: Append at the end instead of prepending. Less ideal UX but zero risk of content loss.
+   - **Prepend strategy**: The Notion API `blocks.children.append()` only appends to the end. The `after` parameter requires a valid block UUID — it does **not** support empty strings or the page ID to achieve a prepend effect. The API has no native "insert at index 0" capability.
+     - **Workarounds**:
+       - **Option A**: Append the toggle, then move existing content after it. But Notion API doesn't support reordering blocks. **Not viable.**
+       - **Option B (Risky)**: Delete all existing blocks and re-create them in the correct order (toggle first, then originals). **REJECTED** — if the process crashes mid-recreation, content is lost.
+       - **Option C (Recommended)**: Append the toggle at the end of the page. Less ideal positioning but **zero risk of content loss**. Users can manually drag it to the top in Notion if desired.
 
-> **Recommendation**: Try Option B first (API `after` parameter). If the API doesn't support inserting before the first block, fall back to Option D (append at end) and document the limitation. **Never delete existing blocks to reorder.**
+> **Decision**: Use Option C — append at the end. This is the safest approach and avoids any risk of data loss. The toggle will appear at the bottom of the page body. **Never delete existing blocks to reorder.**
 
 #### 2c. Block structure for video embeds
 
@@ -310,10 +308,13 @@ async function runUploader(): Promise<void> {
     let currentOutput = readOutput();
 
     await uploadPhaseVideos(notion, selectedPhase.title, selectedPhase.subjects, {
-      onClassDone: ({ classTitle, uploadedCount }) => {
-        // Mark videos as uploaded in state
-        // Write state immediately (incremental persistence)
-        spinner.text = `[uploader] Uploaded ${classTitle} (${uploadedCount} videos)`;
+      onClassDone: ({ classTitle, videoTitles }) => {
+        // Mark each video as uploaded in state and persist immediately
+        for (const videoTitle of videoTitles) {
+          currentOutput = setVideoUploaded(currentOutput, selectedPhase.title, classTitle, videoTitle);
+        }
+        writeOutput(currentOutput);
+        spinner.text = `[uploader] Uploaded ${classTitle} (${videoTitles.length} videos)`;
       },
     });
 
@@ -386,11 +387,9 @@ Update `selectPhase()` to show upload status `[U]` alongside existing `[S][V]`:
 
 ### 4. File size limits
 
-- Notion API may have file size limits for uploads (typically 5MB for free, higher for paid)
-- MP4 lecture videos can be large (100MB+). If the File Upload API has limits:
-  - Log a warning for files exceeding the limit
-  - Skip those files and mark them with an error state
-  - Consider adding a `NOTION_FILE_SIZE_LIMIT_MB` env var
+- S3/hosting provider may have upload size limits — typically generous (5GB+ for S3 multipart)
+- MP4 lecture videos can be large (100MB+). Consider using S3 multipart upload for files > 100MB
+- Notion's `external` video block has no known file size limit — it just references a URL
 
 ### 5. Missing `notionPageId`
 
@@ -418,7 +417,7 @@ User selects "Notion Uploader" mode
   │    │
   │    ├─ For each video:
   │    │    ├─ Resolve MP4 path via getVideoOutputPath()
-  │    │    ├─ Upload MP4 to Notion (or get external URL)
+  │    │    ├─ Upload MP4 to S3-compatible storage, get public URL
   │    │    └─ Collect video block data
   │    │
   │    ├─ Check if "Playlist" toggle H1 exists on page
@@ -434,9 +433,13 @@ User selects "Notion Uploader" mode
 
 ---
 
+## Resolved Questions
+
+1. ~~Does the Notion SDK v5.15.0 support file uploads?~~ **No.** The Notion Public API does not support direct file uploads for integrations. Use `external` URL video blocks with S3-compatible hosting.
+2. ~~Can `blocks.children.append()` insert at position 0?~~ **No.** The `after` parameter requires a valid block UUID; there is no way to prepend. The toggle will be **appended** at the end of the page body (safe approach).
+
 ## Open Questions (to resolve during implementation)
 
-1. **Does the Notion SDK v5.15.0 support file uploads?** This is the single biggest unknown. Step 0 must be done first.
-2. **Can `blocks.children.append()` insert at position 0 (before existing blocks)?** If not, the toggle goes at the end.
-3. **Is there a file size limit for Notion file uploads via API?** Affects whether large lecture videos can be uploaded.
-4. **Should we support re-uploading (overwriting) previously uploaded videos?** Current plan is skip-if-uploaded; user would need to manually delete the Playlist toggle and reset `uploaded` flags to re-upload.
+1. **Which S3-compatible hosting service to use?** S3, Cloudflare R2, Backblaze B2? Affects env var naming and SDK dependency.
+2. **Should we support re-uploading (overwriting) previously uploaded videos?** Current plan is skip-if-uploaded; user would need to manually delete the Playlist toggle and reset `uploaded` flags to re-upload.
+3. **Should multipart upload be used for large MP4 files?** Lecture videos can be 100MB+. Standard S3 `PutObject` supports up to 5GB but multipart is more reliable for large files.
