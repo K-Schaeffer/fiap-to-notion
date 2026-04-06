@@ -22,6 +22,7 @@ import {
   setPhaseVideos,
   setVideoConverted,
 } from './state';
+import { StatePhase } from './state/types';
 import { assertFfmpegAvailable, convertPhaseVideos } from './download';
 
 function validateScraperEnv(): void {
@@ -161,9 +162,7 @@ async function runScraper(): Promise<void> {
   }
 }
 
-function getConversionStatus(
-  phases: { title: string; subjects: { classes: { videos: { converted: boolean }[] }[] }[] }[],
-): Map<string, '✓' | '~' | ' '> {
+function getConversionStatus(phases: StatePhase[]): Map<string, '✓' | '~' | ' '> {
   return new Map(
     phases.map((p) => {
       const allVideos = p.subjects.flatMap((s) => s.classes.flatMap((c) => c.videos));
