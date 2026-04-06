@@ -22,66 +22,93 @@ No test runner is configured yet. Node.js >= 24.x and npm >= 11.x required.
 
 ## Architecture
 
-This is a TypeScript + Puppeteer web scraper that authenticates on the FIAP course platform, extracts course structure, matches classes to Notion, and (next) uploads HLS videos.
+This is a TypeScript CLI tool for the FIAP course platform. It has two modes: a **Scraper** (Puppeteer) that authenticates, extracts course structure, matches classes to Notion, and scrapes HLS video URLs; and a **Video Converter** (ffmpeg) that downloads those HLS streams and remuxes them to MP4.
 
-**Execution flow** (`src/index.ts`):
-1. Launch Puppeteer browser
-2. `auth/` — Log in with credentials from `.env`, navigate to course page
-3. `phases/` — Scrape all available phases
-4. `cli/` — Interactive prompt: user selects a phase; loops until exit
-5. `subjects/` — Scrape subjects and classes for the selected phase
-6. `notion/` — Resolve Conteúdo DB collection ID, match `ClassItem.title` → Notion page ID
-7. `content-video/` — For each unfetched class, open a new tab, navigate to `contentUrl`, scrape `pos_videos_container` inside `#iframecontent`, extract all playlist videos (title, duration, HLS URL derived from thumbnail CDN hash), write to state, close tab
+**Top-level flow** (`src/index.ts`):
+
+1. `selectMode()` — user picks Scraper, Video Converter, or Exit. Converter is disabled when no scraped data exists.
+2. **Scraper** (`runScraper()`): validates env vars → launches Puppeteer → auth → phase list → `while(true)` loop (select phase → sync or get-videos)
+3. **Converter** (`runConverter()`): validates ffmpeg on PATH → reads `data/output.json` → `while(true)` loop (select phase → convert videos). Fully offline — no browser, no Notion.
 
 **Module layout**:
+
 - `src/auth/` — Login and course page access verification
 - `src/phases/` — Scrape phase list; `getPhaseDisplayTitle()` builds the human-readable label from `Phase.topic`
 - `src/subjects/` — Complex DOM evaluation to build `Subject → ClassItem[]` hierarchy
 - `src/notion/` — Resolve Notion collection IDs and match scraped classes to Conteúdo entries
-- `src/cli/` — Interactive phase selector using `@inquirer/prompts`
-- `src/content-video/` — Sequential video scraper; `getAllVideos()` opens one tab per class, closes after scraping, calls `onClassDone` callback for incremental persistence
-- `src/state/` — Read/write `output/output.json`; `upsertPhase()` merges scraped data preserving existing videos; `setPhaseVideos()` marks classes as fetched
+- `src/cli/` — Top-level mode selector, scraper phase/action selectors, converter phase/action selectors; all using `@inquirer/prompts`
+- `src/content-video/` — Sequential video URL scraper; `getAllVideos()` opens one tab per class, closes after scraping, calls `onClassDone` callback for incremental persistence
+- `src/download/` — Video converter; `convertPhaseVideos()` downloads all unconverted videos in parallel via ffmpeg (`-c copy` remux to MP4), calls `onVideoDone`/`onProgress` callbacks
+- `src/state/` — Read/write `data/output.json`; `upsertPhase()` merges scraped data preserving existing videos and conversion status; `setPhaseVideos()` marks classes as fetched; `setVideoConverted()` marks individual videos as converted
 - `src/constants/` — FIAP URLs (single source of truth)
 - `src/utils.ts` — `assertNotBlocked(page)`: detects CloudFront WAF block pages by checking `document.title` for "error"; called after every `page.goto()`
 
 **Key types** (in each module's `types.ts`):
+
 - `Phase`: title, topic (from "Welcome to \<topic\>" marker), isActive, index, courseId
 - `Subject`: title, classes (ClassItem[])
 - `ClassItem`: title, contentUrl, pdfUrl, progress
-- `ContentVideo`: title, duration, hlsUrl
+- `ContentVideo`: title, duration, hlsUrl, converted (bool)
 - `ClassVideos`: classTitle, videos (ContentVideo[])
 - `StateClass`: extends ClassItem with notionPageId, videosFetched (bool), videos (ContentVideo[])
+- `StatePhase`: title (display title from `getPhaseDisplayTitle()`), subjects (StateSubject[])
 - `ScraperOutput`: phases (StatePhase[]), lastUpdated (ISO timestamp)
 
 **DOM scraping pattern**: `phases/` uses `page.$$eval()` for batch extraction; `subjects/` uses a single `page.evaluate()` call running client-side JS against the full document.
 
 ## State Persistence
 
-All scraping output is persisted to `output/output.json` (gitignored). This file is the single source of truth for sync and video fetch status across runs.
+All scraping output is persisted to `data/output.json` (gitignored via `data/`). This file is the single source of truth for sync, video fetch, and conversion status across runs.
+
+**`StatePhase.title`**: stores the display title from `getPhaseDisplayTitle()` (e.g. "Fase 1 - Desenvolvimento avançado"), not the raw FIAP DOM title. All lookups in state — `upsertPhase`, `setPhaseVideos`, `setVideoConverted` — match by this display title.
 
 **`videosFetched` flag**: set to `true` on a class only after `scrapeClassVideos()` completes successfully. A partial fetch (e.g. interrupted mid-run) leaves unfetched classes with `videosFetched: false`, so re-running resumes from where it stopped. Never pre-set this flag — it must only be written after confirmed completion.
 
-**Incremental writes**: `onClassDone` callback in `getAllVideos()` writes each class to disk immediately after scraping it, so a crash never loses completed work.
+**`converted` flag**: set to `true` on each `ContentVideo` after successful ffmpeg conversion. Same resume pattern — unconverted videos are retried on next run. Written per-video via `setVideoConverted()`.
+
+**Incremental writes**: both scraper (`onClassDone`) and converter (`onVideoDone`) write to disk immediately after each unit completes, so a crash never loses completed work.
 
 **Resync safety**: `upsertPhase()` looks up each class by subject title + class title and preserves its `videos` and `videosFetched`. A resync only overwrites scraped metadata (contentUrl, pdfUrl, progress, notionPageId). Renamed classes are treated as new (videos reset).
 
-## CLI Status Indicators
+## Video Conversion
 
-The phase selector shows `[S][V]` prefixes:
+Converted videos are stored at `data/videos/<phase>/<subject>/<class>/<video>.mp4` (gitignored). Titles are sanitized for filesystem safety (unsafe chars replaced with `_`).
+
+**ffmpeg**: requires system ffmpeg on PATH. Static npm binaries (`ffmpeg-static`, `@ffmpeg-installer/ffmpeg`) crash on TLS when fetching HLS from CloudFront — do not use them. Validated at converter startup via `assertFfmpegAvailable()`.
+
+**Download strategy**: all unconverted videos in a phase download in parallel via `Promise.all`, each spawning its own ffmpeg process. Uses `-c copy` (remux, no re-encoding) and `-movflags +faststart`. Parallelism is safe here — ffmpeg fetches `.ts` segments directly from the CDN, not through the WAF-protected course pages.
+
+**Progress display**: single ora spinner shows overall count and current video progress (`time=HH:MM:SS`). Completed videos log a `✓` line above the spinner.
+
+## CLI Structure
+
+**Top-level**: `selectMode()` — Scraper / Video Converter (disabled if no `data/output.json`) / Exit.
+
+**Scraper phase selector** shows `[S][V]` prefixes:
+
 - `S` — synced (subjects/classes scraped and matched to Notion)
 - `V` — videos: `✓` all fetched · `~` partially fetched · ` ` none fetched
 
-Action menu CTA adapts based on video status: `"Get Videos"` / `"Continue fetching videos"` / `"Re-fetch Videos"`.
+Action menu CTA adapts based on video status: `"Get Videos"` / `"Continue fetching videos"`.
+
+**Converter phase selector** shows `[C]` prefix:
+
+- `C` — converted: `✓` all · `~` partial · ` ` none
+
+Only phases with fetched videos appear. Fully converted phases are disabled.
 
 ## CloudFront Rate Limiting
 
-FIAP video content is served via CloudFront with a WAF rule that blocks rapid parallel requests. Opening multiple tabs simultaneously (even with staggered delays) triggers 403 blocks mid-run.
+FIAP video content pages are served via CloudFront with a WAF rule that blocks rapid parallel requests. Opening multiple browser tabs simultaneously (even with staggered delays) triggers 403 blocks mid-run.
 
-**Strategy**: always fetch videos sequentially, one class at a time, each in its own tab that is closed immediately after. Do not parallelize or batch class content page requests. The main page (course listing) is never navigated during video fetching — only new tabs are used.
+**Scraper strategy**: always fetch video URLs sequentially, one class at a time, each in its own tab that is closed immediately after. Do not parallelize or batch class content page requests. The main page (course listing) is never navigated during video fetching — only new tabs are used.
+
+**Converter strategy**: video downloads (ffmpeg fetching HLS segments from CDN) are NOT subject to the WAF and run in parallel safely.
 
 ## Environment
 
 Copy `.env.example` to `.env`:
+
 ```
 FIAP_USERNAME=...
 FIAP_PASSWORD=...
@@ -89,11 +116,12 @@ NOTION_TOKEN=...           # Notion integration token
 NOTION_PHASES_DB_ID=...    # Page ID of the top-level Fases database (not the collection ID — resolved internally)
 ```
 
-All four vars are validated at startup — the scraper will fail fast if any are missing.
+Env vars are validated when entering **Scraper mode** only — not at global startup. The Video Converter mode is fully offline and only needs `data/output.json` + system ffmpeg.
 
 ## FIAP Course Page Structure
 
 The course page DOM hierarchy relevant to scraping:
+
 - `.conteudo-digital-disciplina-content` — one per phase
   - `.conteudo-digital-disciplina-fase[data-fase="<courseId>"]` — phase header; holds title and ID
 - `.conteudo-digital-list` — sibling of the above; contains all subjects and classes for that phase
@@ -108,6 +136,7 @@ The course page DOM hierarchy relevant to scraping:
 Phase active detection: completed courses have no reliable CSS/ARIA active marker — `isActive` is best-effort and only used to pre-select the default in the CLI prompt. Phase selection is always user-driven.
 
 Items skipped during subject scraping (section headers, not real content):
+
 - `is-marcador` items starting with `"Welcome"` or `"Atividade:"`
 - Regular items titled `"Conteúdos externos"`
 
@@ -142,15 +171,18 @@ Inside the iframe, the `.pos_videos_container` div holds the entire video player
 **HLS URL derivation** (no need to navigate to embed pages):
 
 The thumbnail URL and HLS master playlist share the same CDN hash:
+
 - Thumbnail: `https://d1l755to62lquf.cloudfront.net/{hash}/Thumbnails/file.0000001.jpg`
-- HLS:       `https://d1l755to62lquf.cloudfront.net/{hash}/HLS/file.m3u8`
+- HLS: `https://d1l755to62lquf.cloudfront.net/{hash}/HLS/file.m3u8`
 
 Extract the hash from any playlist item's thumbnail `src` and substitute the path suffix to get the HLS URL. This works for all videos in the playlist without clicking or navigating.
 
 **Embed page** (`embed.php?video={videoHash}`): Video.js player initialized via `[data-setup]` attribute:
+
 ```json
 { "sources": { "type": "application/x-mpegURL", "src": "https://.../{hash}/HLS/file.m3u8" }, ... }
 ```
+
 The embed page is only needed if the thumbnail-based derivation ever fails.
 
 ## Notion Workspace Structure
