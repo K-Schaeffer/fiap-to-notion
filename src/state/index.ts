@@ -3,7 +3,7 @@ import path from 'path';
 import { Phase } from '../phases/types';
 import { getPhaseDisplayTitle } from '../phases';
 import { Subject } from '../subjects/types';
-import { ClassNotionMap } from '../notion/types';
+import { ClassNotionMap } from '../notion-matcher/types';
 import { ContentVideo } from '../content-video/types';
 import { ScraperOutput, StatePhase } from './types';
 
