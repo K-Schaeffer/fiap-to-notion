@@ -2,6 +2,8 @@
 
 A personal tool I built to scratch my own itch: automatically syncing my FIAP course materials into my Notion workspace so I can study from a single place without manually copying anything. The app is a three-stage CLI pipeline — scrape, convert, upload — and each stage is fully resumable if interrupted.
 
+With this tool I scraped through **5 phases**, **119 classes**, and **335 videos** — converting **~26 GB** of HLS streams into MP4s totalling **92 hours and 15 minutes** of course content — and uploaded them directly into the corresponding Notion class pages.
+
 ## Description
 
 **Scraper** — authenticates on the FIAP platform, extracts course structure (phases, subjects, classes), matches each class to its Notion page, and scrapes HLS video URLs.
