@@ -22,13 +22,14 @@ No test runner is configured yet. Node.js >= 24.x and npm >= 11.x required.
 
 ## Architecture
 
-This is a TypeScript CLI tool for the FIAP course platform. It has two modes: a **Scraper** (Puppeteer) that authenticates, extracts course structure, matches classes to Notion, and scrapes HLS video URLs; and a **Video Converter** (ffmpeg) that downloads those HLS streams and remuxes them to MP4.
+This is a TypeScript CLI tool for the FIAP course platform. It has three modes: a **Scraper** (Puppeteer) that authenticates, extracts course structure, matches classes to Notion, and scrapes HLS video URLs; a **Video Converter** (ffmpeg) that downloads those HLS streams and remuxes them to MP4; and a **Notion Uploader** that uploads the converted MP4s to Notion and embeds them in class pages.
 
 **Top-level flow** (`src/index.ts`):
 
-1. `selectMode()` — user picks Scraper, Video Converter, or Exit. Converter is disabled when no scraped data exists.
+1. `selectMode()` — user picks Scraper, Video Converter, Notion Uploader, or Exit. Converter is disabled when no scraped data exists; Uploader is disabled when no converted (unuploaded) videos exist.
 2. **Scraper** (`runScraper()`): validates env vars → launches Puppeteer → auth → phase list → `while(true)` loop (select phase → sync or get-videos)
 3. **Converter** (`runConverter()`): validates ffmpeg on PATH → reads `data/output.json` → `while(true)` loop (select phase → convert videos). Fully offline — no browser, no Notion.
+4. **Uploader** (`runUploader()`): validates `NOTION_TOKEN` → reads `data/output.json` → `while(true)` loop (select phase → upload videos to Notion). Requires only `NOTION_TOKEN`.
 
 **Module layout**:
 
@@ -36,10 +37,11 @@ This is a TypeScript CLI tool for the FIAP course platform. It has two modes: a 
 - `src/phases/` — Scrape phase list; `getPhaseDisplayTitle()` builds the human-readable label from `Phase.topic`
 - `src/subjects/` — Complex DOM evaluation to build `Subject → ClassItem[]` hierarchy
 - `src/notion/` — Resolve Notion collection IDs and match scraped classes to Conteúdo entries
-- `src/cli/` — Top-level mode selector, scraper phase/action selectors, converter phase/action selectors; all using `@inquirer/prompts`
+- `src/notion-upload/` — Upload MP4 files to Notion via `notion.fileUploads` API and embed them as `video` blocks inside a toggleable `heading_1` ("Playlist") on class pages; `uploadPhaseVideos()` is the main entry point
+- `src/cli/` — Top-level mode selector, scraper phase/action selectors, converter phase/action selectors, uploader phase/action selectors; all using `@inquirer/prompts`
 - `src/content-video/` — Sequential video URL scraper; `getAllVideos()` opens one tab per class, closes after scraping, calls `onClassDone` callback for incremental persistence
 - `src/download/` — Video converter; `convertPhaseVideos()` downloads all unconverted videos in parallel via ffmpeg (`-c copy` remux to MP4), calls `onVideoDone`/`onProgress` callbacks
-- `src/state/` — Read/write `data/output.json`; `upsertPhase()` merges scraped data preserving existing videos and conversion status; `setPhaseVideos()` marks classes as fetched; `setVideoConverted()` marks individual videos as converted
+- `src/state/` — Read/write `data/output.json`; `upsertPhase()` merges scraped data preserving existing videos and conversion status; `setPhaseVideos()` marks classes as fetched; `setVideoConverted()` marks individual videos as converted; `setVideoUploaded()` marks individual videos as uploaded
 - `src/constants/` — FIAP URLs (single source of truth)
 - `src/utils.ts` — `assertNotBlocked(page)`: detects CloudFront WAF block pages by checking `document.title` for "error"; called after every `page.goto()`
 
@@ -48,7 +50,7 @@ This is a TypeScript CLI tool for the FIAP course platform. It has two modes: a 
 - `Phase`: title, topic (from "Welcome to \<topic\>" marker), isActive, index, courseId
 - `Subject`: title, classes (ClassItem[])
 - `ClassItem`: title, contentUrl, pdfUrl, progress
-- `ContentVideo`: title, duration, hlsUrl, converted (bool)
+- `ContentVideo`: title, duration, hlsUrl, converted (bool), uploaded (bool)
 - `ClassVideos`: classTitle, videos (ContentVideo[])
 - `StateClass`: extends ClassItem with notionPageId, videosFetched (bool), videos (ContentVideo[])
 - `StatePhase`: title (display title from `getPhaseDisplayTitle()`), subjects (StateSubject[])
@@ -66,7 +68,9 @@ All scraping output is persisted to `data/output.json` (gitignored via `data/`).
 
 **`converted` flag**: set to `true` on each `ContentVideo` after successful ffmpeg conversion. Same resume pattern — unconverted videos are retried on next run. Written per-video via `setVideoConverted()`.
 
-**Incremental writes**: both scraper (`onClassDone`) and converter (`onVideoDone`) write to disk immediately after each unit completes, so a crash never loses completed work.
+**`uploaded` flag**: set to `true` on each `ContentVideo` after the video is successfully uploaded to Notion AND embedded in the class page — both must succeed before `onClassDone` fires. Same resume pattern — a class interrupted mid-upload has `uploaded: false` and retries cleanly next run; orphaned file uploads on Notion's side expire automatically. Written per-video via `setVideoUploaded()` inside `onClassDone`. Existing `data/output.json` files without this field default to `false` (TypeScript optional field).
+
+**Incremental writes**: scraper (`onClassDone`), converter (`onVideoDone`), and uploader (`onClassDone`) all write to disk immediately after each unit completes, so a crash never loses completed work.
 
 **Resync safety**: `upsertPhase()` looks up each class by subject title + class title and preserves its `videos` and `videosFetched`. A resync only overwrites scraped metadata (contentUrl, pdfUrl, progress, notionPageId). Renamed classes are treated as new (videos reset).
 
@@ -80,9 +84,29 @@ Converted videos are stored at `data/videos/<phase>/<subject>/<class>/<video>.mp
 
 **Progress display**: single ora spinner shows overall count and current video progress (`time=HH:MM:SS`). Completed videos log a `✓` line above the spinner.
 
+## Notion Upload
+
+Uploads converted MP4 files to Notion and embeds them in class pages via the `notion.fileUploads` API (SDK v5.15.0+).
+
+**File upload strategy**:
+
+- Files ≤ 20 MiB → `mode: 'single_part'`: `fileUploads.create()` + `fileUploads.send()`
+- Files > 20 MiB → `mode: 'multi_part'`: `fileUploads.create({ number_of_parts })` + sequential `fileUploads.send()` per chunk + `fileUploads.complete()`
+- Chunks are read from disk with `fs.openSync`/`fs.readSync` to avoid loading entire files into memory
+
+**Block structure**: each class page gets a toggleable `heading_1` titled "Playlist" prepended as the first block (via `position: { type: 'start' }` in `blocks.children.append`). Video blocks inside use `type: 'file_upload'` with the upload ID.
+
+**Idempotency**: before creating the "Playlist" toggle, `findPlaylistToggle()` paginates through all page blocks to check if it already exists. If found, new video blocks are appended inside the existing toggle instead of creating a duplicate.
+
+**Parallelism**: mirrors the converter pattern exactly — `subjects.flatMap(classes)` builds a flat task list, classes run in parallel (bounded by `NOTION_UPLOAD_CONCURRENCY`, default **3** to match Notion's ~3 req/s rate limit), within each class all video uploads run in parallel via `Promise.all`. `onClassDone` is safe from parallel class tasks because JS Promise callbacks are microtasks that execute atomically — no interleaving of the synchronous state mutation.
+
+**Retry**: `withRetry()` wraps both `uploadVideoFile` and `addVideosToPage` calls. On 429/502/503/504 or SDK timeout, it retries up to 3 times with exponential backoff (2 s → 4 s → 8 s). The Notion client is created with `timeoutMs: 120_000` (doubled from the SDK default) to give rate-limited requests time to get a response slot before timing out.
+
+**Orphaned uploads**: if a class fails after file uploads but before embedding, those file upload objects sit on Notion's servers and expire automatically (~24 h). The class retains `uploaded: false` so it re-uploads cleanly next run. There is no way to resume a partially-uploaded class — the whole class is retried.
+
 ## CLI Structure
 
-**Top-level**: `selectMode()` — Scraper / Video Converter (disabled if no `data/output.json`) / Exit.
+**Top-level**: `selectMode()` — Scraper / Video Converter / Notion Uploader / Exit. Converter disabled if no `data/output.json`; Uploader disabled if no converted+unuploaded videos exist.
 
 **Scraper phase selector** shows `[S][V]` prefixes:
 
@@ -96,6 +120,12 @@ Action menu CTA adapts based on video status: `"Get Videos"` / `"Continue fetchi
 - `C` — converted: `✓` all · `~` partial · ` ` none
 
 Only phases with fetched videos appear. Fully converted phases are disabled.
+
+**Uploader phase selector** shows `[U]` prefix:
+
+- `U` — uploaded: `✓` all converted videos uploaded · `~` partial · ` ` none uploaded
+
+All phases with any converted video appear. Fully uploaded phases are disabled (same pattern as converter).
 
 ## CloudFront Rate Limiting
 
@@ -112,12 +142,13 @@ Copy `.env.example` to `.env`:
 ```
 FIAP_USERNAME=...
 FIAP_PASSWORD=...
-NOTION_TOKEN=...           # Notion integration token
-NOTION_PHASES_DB_ID=...    # Page ID of the top-level Fases database (not the collection ID — resolved internally)
-FFMPEG_CONCURRENCY=...     # Optional — max parallel ffmpeg processes (default: unlimited)
+NOTION_TOKEN=...                 # Notion integration token
+NOTION_PHASES_DB_ID=...          # Page ID of the top-level Fases database (not the collection ID — resolved internally)
+FFMPEG_CONCURRENCY=...           # Optional — max parallel ffmpeg processes (default: unlimited)
+NOTION_UPLOAD_CONCURRENCY=...    # Optional — max parallel class uploads (default: 3, matches Notion's ~3 req/s rate limit; set to 0 for unlimited)
 ```
 
-Scraper vars are validated when entering **Scraper mode** only — not at global startup. The Video Converter mode is fully offline and only needs `data/output.json` + system ffmpeg.
+Scraper vars are validated when entering **Scraper mode** only — not at global startup. The Video Converter mode is fully offline and only needs `data/output.json` + system ffmpeg. The Notion Uploader only requires `NOTION_TOKEN`.
 
 ## FIAP Course Page Structure
 
