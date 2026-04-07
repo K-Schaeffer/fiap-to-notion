@@ -21,12 +21,12 @@ const CHUNK_SIZE = 20 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 /**
- * Retries an async operation up to 3 times with exponential backoff (2s, 4s, 8s).
+ * Retries an async operation up to 5 times with exponential backoff (2s, 4s, 8s, 16s, 32s).
  * Retries on transient Notion errors: gateway timeouts (504/502/503), rate limits (429),
  * and SDK-level request timeouts. Throws immediately on all other errors.
  */
 async function withRetry<T>(fn: () => Promise<T>, onRetry?: (msg: string) => void): Promise<T> {
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 5;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       return await fn();
