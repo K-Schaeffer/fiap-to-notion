@@ -1,23 +1,23 @@
 # FIAP to Notion
 
-A work in progress... :hourglass_flowing_sand:
+A personal tool I built to scratch my own itch: automatically syncing my FIAP course materials into my Notion workspace so I can study from a single place without manually copying anything. The app is a three-stage CLI pipeline — scrape, convert, upload — and each stage is fully resumable if interrupted.
 
 ## Description
-
-This project automates syncing study materials from my FIAP course into my personal Notion workspace. It has two modes:
 
 **Scraper** — authenticates on the FIAP platform, extracts course structure (phases, subjects, classes), matches each class to its Notion page, and scrapes HLS video URLs.
 
 **Video Converter** — downloads HLS video streams and converts them to MP4 files using ffmpeg. Fully offline — no browser or credentials needed, just the scraped data.
 
-Both modes are fully resumable. Progress is persisted after every video/class, so interrupted runs pick up where they left off.
+**Notion Uploader** — uploads the converted MP4s to Notion's file storage and embeds them as video blocks inside a "Playlist" toggle on each class page. Only requires a Notion token.
+
+All three modes are fully resumable. Progress is persisted after every video/class, so interrupted runs pick up exactly where they left off.
 
 ### Flow
 
-1. Launch the CLI (`npm run dev`) and pick a mode: **Scraper** or **Video Converter**.
+1. Launch the CLI (`npm run dev`) and pick a mode: **Scraper**, **Video Converter**, or **Notion Uploader**.
 2. **Scraper**: authenticate → select a phase → sync subjects/classes to Notion → fetch HLS video URLs.
 3. **Video Converter**: select a phase with fetched videos → download and convert all videos to MP4 in parallel.
-4. _(Upcoming)_ Upload videos to Notion.
+4. **Notion Uploader**: select a phase with converted videos → upload MP4s and embed them in class pages.
 
 ## How It Works
 
@@ -76,6 +76,25 @@ sequenceDiagram
             cli->>state: Mark each video converted
         end
     end
+
+    rect rgb(60, 40, 40)
+        Note over cli,notion: Notion Uploader Mode
+        cli->>state: Read phases with converted videos
+
+        loop Until exit
+            cli->>user: Select phase [U]
+            user-->>cli: Fase N
+
+            loop Each class with unuploaded videos (parallel, bounded)
+                par Upload videos for class
+                    cli->>notion: fileUploads.create + send (video 1)
+                    cli->>notion: fileUploads.create + send (video 2)
+                end
+                cli->>notion: Embed video blocks in class page
+                cli->>state: Mark class videos uploaded
+            end
+        end
+    end
 ```
 
 ## Notion Workspace Structure
@@ -95,13 +114,13 @@ graph TD
 Each **Fase** page contains two inline databases:
 
 - **Disciplinas** — one row per subject, with a relation to Conteúdo
-- **Conteúdo** — one row per class; this is what the scraper matches against and uploads to
+- **Conteúdo** — one row per class; this is what the scraper matches against and what videos are uploaded to
 
 ## Technologies
 
 - **[TypeScript](https://www.typescriptlang.org/)** — type-safe JavaScript
 - **[Puppeteer](https://pptr.dev/)** — headless browser for scraping the FIAP course platform
-- **[Notion SDK](https://github.com/makenotion/notion-sdk-js)** — querying and updating the Notion workspace
+- **[Notion SDK](https://github.com/makenotion/notion-sdk-js)** — querying, updating, and uploading files to the Notion workspace
 - **[ffmpeg](https://ffmpeg.org/)** — HLS to MP4 video conversion (system install, not bundled)
 - **[@inquirer/prompts](https://github.com/SBoudrias/Inquirer.js)** — interactive CLI prompts
 - **[ora](https://github.com/sindresorhus/ora)** — terminal spinners for async feedback
@@ -138,13 +157,14 @@ cp .env.example .env
 
 ### Environment variables
 
-| Variable              | Required | Description                                        |
-| --------------------- | -------- | -------------------------------------------------- |
-| `FIAP_USERNAME`       | Scraper  | FIAP course login                                  |
-| `FIAP_PASSWORD`       | Scraper  | FIAP course password                               |
-| `NOTION_TOKEN`        | Scraper  | Notion integration token                           |
-| `NOTION_PHASES_DB_ID` | Scraper  | Page ID of the top-level Fases database            |
-| `FFMPEG_CONCURRENCY`  | No       | Max parallel ffmpeg processes (default: unlimited) |
+| Variable                   | Required           | Description                                                                         |
+| -------------------------- | ------------------ | ----------------------------------------------------------------------------------- |
+| `FIAP_USERNAME`            | Scraper            | FIAP course login                                                                   |
+| `FIAP_PASSWORD`            | Scraper            | FIAP course password                                                                |
+| `NOTION_TOKEN`             | Scraper / Uploader | Notion integration token                                                            |
+| `NOTION_PHASES_DB_ID`      | Scraper            | Page ID of the top-level Fases database                                             |
+| `FFMPEG_CONCURRENCY`       | No                 | Max parallel ffmpeg processes (default: unlimited)                                  |
+| `NOTION_UPLOAD_CONCURRENCY`| No                 | Max parallel class uploads in Uploader (default: 3, matches Notion's ~3 req/s rate limit; set to 0 for unlimited) |
 
 ## Output
 
@@ -160,6 +180,8 @@ data/
                 ├── Video Title - I.mp4
                 └── Video Title - II.mp4
 ```
+
+MP4 files can be deleted after a successful Notion upload — they're only needed during the upload step.
 
 ## Scripts
 
