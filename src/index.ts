@@ -316,7 +316,7 @@ async function runUploader(): Promise<void> {
     let currentOutput = readOutput();
     const spinner = ora(`[uploader] (${uploadedCount}/${totalVideos}) Starting...`).start();
 
-    let fileUploadCount = 0;
+    let fileUploadCount = uploadedCount;
     try {
       await uploadPhaseVideos(notion, selectedPhase.title, selectedPhase.subjects, {
         onVideoUploaded: () => {
