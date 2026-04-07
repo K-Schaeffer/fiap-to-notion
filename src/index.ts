@@ -250,7 +250,7 @@ async function runConverter(): Promise<void> {
 function hasConvertedVideos(): boolean {
   if (!hasLocalData()) return false;
   return readOutput().phases.some((p) =>
-    p.subjects.some((s) => s.classes.some((c) => c.videos.some((v) => v.converted && !v.uploaded))),
+    p.subjects.some((s) => s.classes.some((c) => c.videos.some((v) => v.converted))),
   );
 }
 
