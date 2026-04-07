@@ -5,7 +5,7 @@ import { Client, LogLevel } from '@notionhq/client';
 import { loginToFIAP, ensureAccessToCoursePage } from './auth';
 import { getPhaseList, getPhaseDisplayTitle } from './phases';
 import { getSubjectList } from './subjects';
-import { getPhaseCollections, matchClassesToNotion } from './notion';
+import { getPhaseCollections, matchClassesToNotion } from './notion-matcher';
 import {
   selectMode,
   selectPhase,
@@ -26,8 +26,8 @@ import {
   setVideoUploaded,
 } from './state';
 import { StatePhase } from './state/types';
-import { assertFfmpegAvailable, convertPhaseVideos } from './download';
-import { uploadPhaseVideos } from './notion-upload';
+import { assertFfmpegAvailable, convertPhaseVideos } from './converter';
+import { uploadPhaseVideos } from './notion-uploader';
 
 function validateScraperEnv(): void {
   if (!process.env.FIAP_USERNAME || !process.env.FIAP_PASSWORD) {

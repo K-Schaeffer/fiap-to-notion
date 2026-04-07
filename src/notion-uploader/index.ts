@@ -7,7 +7,7 @@ import {
   Heading1BlockObjectResponse,
   BlockObjectRequestWithoutChildren,
 } from '@notionhq/client/build/src/api-endpoints';
-import { getVideoOutputPath } from '../download';
+import { getVideoOutputPath } from '../converter';
 import { StateSubject } from '../state/types';
 import { UploadClassDoneResult } from './types';
 
