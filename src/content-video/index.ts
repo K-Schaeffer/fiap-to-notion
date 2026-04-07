@@ -52,6 +52,7 @@ async function scrapeClassVideos(page: Page, contentUrl: string): Promise<Conten
       duration: v.duration,
       hlsUrl: hlsUrlFromThumbnail(v.thumbnailUrl),
       converted: false,
+      uploaded: false,
     }));
 }
 

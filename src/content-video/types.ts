@@ -3,4 +3,5 @@ export interface ContentVideo {
   duration: string;
   hlsUrl: string;
   converted: boolean;
+  uploaded: boolean;
 }

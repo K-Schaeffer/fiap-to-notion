@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import ora from 'ora';
 import puppeteer, { Browser } from 'puppeteer';
-import { Client } from '@notionhq/client';
+import { Client, LogLevel } from '@notionhq/client';
 import { loginToFIAP, ensureAccessToCoursePage } from './auth';
 import { getPhaseList, getPhaseDisplayTitle } from './phases';
 import { getSubjectList } from './subjects';
@@ -12,6 +12,8 @@ import {
   selectPhaseAction,
   selectConverterPhase,
   selectConverterAction,
+  selectUploaderPhase,
+  selectUploaderAction,
 } from './cli';
 import { getAllVideos } from './content-video';
 import {
@@ -21,9 +23,11 @@ import {
   upsertPhase,
   setPhaseVideos,
   setVideoConverted,
+  setVideoUploaded,
 } from './state';
 import { StatePhase } from './state/types';
 import { assertFfmpegAvailable, convertPhaseVideos } from './download';
+import { uploadPhaseVideos } from './notion-upload';
 
 function validateScraperEnv(): void {
   if (!process.env.FIAP_USERNAME || !process.env.FIAP_PASSWORD) {
@@ -243,14 +247,123 @@ async function runConverter(): Promise<void> {
   }
 }
 
+function hasConvertedVideos(): boolean {
+  if (!hasLocalData()) return false;
+  return readOutput().phases.some((p) =>
+    p.subjects.some((s) => s.classes.some((c) => c.videos.some((v) => v.converted && !v.uploaded))),
+  );
+}
+
+function getUploadStatus(phases: StatePhase[]): Map<string, '✓' | '~' | ' '> {
+  return new Map(
+    phases.map((p) => {
+      const converted = p.subjects.flatMap((s) =>
+        s.classes.flatMap((c) => c.videos.filter((v) => v.converted)),
+      );
+      if (converted.length === 0) return [p.title, ' ' as const];
+      const uploadedCount = converted.filter((v) => v.uploaded).length;
+      const mark = uploadedCount === 0 ? ' ' : uploadedCount === converted.length ? '✓' : '~';
+      return [p.title, mark as '✓' | '~' | ' '];
+    }),
+  );
+}
+
+async function runUploader(): Promise<void> {
+  if (!process.env.NOTION_TOKEN) {
+    throw new Error('Please provide NOTION_TOKEN in .env file');
+  }
+
+  // 120s timeout: default 60s is too short when many concurrent requests queue up
+  // behind Notion's 3 req/s rate limiter and wait for a response slot.
+  // logLevel: ERROR suppresses the SDK's own warn logs — we handle retries ourselves.
+  const notion = new Client({ auth: process.env.NOTION_TOKEN, timeoutMs: 120_000, logLevel: LogLevel.ERROR });
+
+  while (true) {
+    console.log();
+    const output = readOutput();
+
+    // Show all phases with converted videos — fully uploaded ones appear disabled,
+    // same behaviour as the converter with fully converted phases.
+    const eligiblePhases = output.phases.filter((p) =>
+      p.subjects.some((s) => s.classes.some((c) => c.videos.some((v) => v.converted))),
+    );
+
+    if (eligiblePhases.length === 0) {
+      console.log('⚠️  No phases with converted videos ready for upload.');
+      return;
+    }
+
+    const uploadStatus = getUploadStatus(eligiblePhases);
+    const selection = await selectUploaderPhase(eligiblePhases, uploadStatus);
+
+    if (selection.type === 'exit') break;
+
+    const { phase: selectedPhase } = selection;
+    const status = (uploadStatus.get(selectedPhase.title) ?? ' ') as '~' | ' ';
+
+    const action = await selectUploaderAction(status);
+    if (action === 'go-back') continue;
+    if (action === 'exit') break;
+
+    console.log();
+
+    const allConverted = selectedPhase.subjects.flatMap((s) =>
+      s.classes.flatMap((c) => c.videos.filter((v) => v.converted)),
+    );
+    const totalVideos = allConverted.length;
+    let uploadedCount = allConverted.filter((v) => v.uploaded).length;
+
+    let currentOutput = readOutput();
+    const spinner = ora(`[uploader] (${uploadedCount}/${totalVideos}) Starting...`).start();
+
+    let fileUploadCount = 0;
+    try {
+      await uploadPhaseVideos(notion, selectedPhase.title, selectedPhase.subjects, {
+        onVideoUploaded: () => {
+          fileUploadCount++;
+          spinner.text = `[uploader] Uploading files... (${fileUploadCount}/${totalVideos})`;
+        },
+        onClassDone: ({ classTitle, videoTitles }) => {
+          for (const videoTitle of videoTitles) {
+            currentOutput = setVideoUploaded(
+              currentOutput,
+              selectedPhase.title,
+              classTitle,
+              videoTitle,
+            );
+          }
+          writeOutput(currentOutput);
+          uploadedCount += videoTitles.length;
+
+          spinner.clear();
+          console.log(`  ✓ ${classTitle} (${videoTitles.length} videos)`);
+          spinner.text = `[uploader] Embedding in Notion... (${uploadedCount}/${totalVideos})`;
+          spinner.render();
+        },
+        onRetry: (msg) => {
+          spinner.clear();
+          console.warn(`  ${msg}`);
+          spinner.render();
+        },
+      });
+    } catch (err) {
+      spinner.fail(`[uploader] Upload interrupted (${uploadedCount}/${totalVideos})`);
+      throw err;
+    }
+
+    spinner.succeed(`[uploader] All videos uploaded (${uploadedCount}/${totalVideos})`);
+  }
+}
+
 async function main() {
   while (true) {
     console.log();
-    const mode = await selectMode(hasLocalData());
+    const mode = await selectMode(hasLocalData(), hasConvertedVideos());
 
     if (mode === 'exit') break;
     if (mode === 'scraper') await runScraper();
     if (mode === 'converter') await runConverter();
+    if (mode === 'uploader') await runUploader();
   }
 }
 

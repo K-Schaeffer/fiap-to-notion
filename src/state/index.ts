@@ -109,6 +109,38 @@ export function setVideoConverted(
 }
 
 /**
+ * Marks a specific video as uploaded to Notion within a phase.
+ */
+export function setVideoUploaded(
+  output: ScraperOutput,
+  phaseTitle: string,
+  classTitle: string,
+  videoTitle: string,
+): ScraperOutput {
+  return {
+    ...output,
+    phases: output.phases.map((phase) => {
+      if (phase.title !== phaseTitle) return phase;
+      return {
+        ...phase,
+        subjects: phase.subjects.map((subject) => ({
+          ...subject,
+          classes: subject.classes.map((cls) => {
+            if (cls.title !== classTitle) return cls;
+            return {
+              ...cls,
+              videos: cls.videos.map((v) =>
+                v.title === videoTitle ? { ...v, uploaded: true } : v,
+              ),
+            };
+          }),
+        })),
+      };
+    }),
+  };
+}
+
+/**
  * Writes the fetched videos into their corresponding classes for a given phase.
  */
 export function setPhaseVideos(

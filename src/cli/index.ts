@@ -3,7 +3,7 @@ import { Phase } from '../phases/types';
 import { getPhaseDisplayTitle } from '../phases';
 import { StatePhase } from '../state/types';
 
-export type AppMode = 'scraper' | 'converter' | 'exit';
+export type AppMode = 'scraper' | 'converter' | 'uploader' | 'exit';
 
 export type PhaseAction = 'sync' | 'get-videos' | 'go-back' | 'exit';
 
@@ -77,12 +77,16 @@ export async function selectPhase(
 
 // --- Top-level mode selector ---
 
-export async function selectMode(hasScrapedData: boolean): Promise<AppMode> {
+export async function selectMode(
+  hasScrapedData: boolean,
+  hasConvertedVideos: boolean,
+): Promise<AppMode> {
   return select<AppMode>({
     message: 'What would you like to do?',
     choices: [
       { name: 'Scraper', value: 'scraper' },
       { name: 'Video Converter', value: 'converter', disabled: !hasScrapedData },
+      { name: 'Notion Uploader', value: 'uploader', disabled: !hasConvertedVideos },
       new Separator(),
       { name: 'Exit', value: 'exit' },
     ],
@@ -137,6 +141,62 @@ export async function selectConverterAction(conversionStatus: '~' | ' '): Promis
     message: 'What would you like to do?',
     choices: [
       { name: CONVERT_ACTION_LABEL[conversionStatus], value: 'convert-videos' },
+      { name: 'Go back', value: 'go-back' },
+      new Separator(),
+      { name: 'Exit', value: 'exit' },
+    ],
+  });
+}
+
+// --- Uploader CLI ---
+
+export type UploaderPhaseResult = { type: 'phase'; phase: StatePhase } | { type: 'exit' };
+
+export type UploaderAction = 'upload-videos' | 'go-back' | 'exit';
+
+/**
+ * Prompts the user to select a phase for Notion upload.
+ * Only phases with converted + unuploaded videos appear.
+ * Fully uploaded phases are disabled.
+ */
+export async function selectUploaderPhase(
+  phases: StatePhase[],
+  uploadStatus: Map<string, '✓' | '~' | ' '>,
+): Promise<UploaderPhaseResult> {
+  type Choice = StatePhase | 'exit';
+
+  console.log('  [U]  U = Uploaded (✓ all · ~ partial)');
+  const result = await select<Choice>({
+    message: 'Select a phase to upload:',
+    choices: [
+      ...phases.map((phase) => {
+        const mark = uploadStatus.get(phase.title) ?? ' ';
+        const done = mark === '✓';
+        return {
+          name: `[${mark}] ${phase.title}`,
+          value: phase as Choice,
+          disabled: done,
+        };
+      }),
+      new Separator(),
+      { name: 'Exit', value: 'exit' as Choice },
+    ],
+  });
+
+  if (result === 'exit') return { type: 'exit' };
+  return { type: 'phase', phase: result };
+}
+
+const UPLOAD_ACTION_LABEL: Record<'~' | ' ', string> = {
+  '~': 'Continue uploading videos',
+  ' ': 'Upload Videos to Notion',
+};
+
+export async function selectUploaderAction(uploadStatus: '~' | ' '): Promise<UploaderAction> {
+  return select<UploaderAction>({
+    message: 'What would you like to do?',
+    choices: [
+      { name: UPLOAD_ACTION_LABEL[uploadStatus], value: 'upload-videos' },
       { name: 'Go back', value: 'go-back' },
       new Separator(),
       { name: 'Exit', value: 'exit' },
